@@ -88,33 +88,53 @@
 }
 
 .composer-send {
-  border: none;
-  background: var(--surface-control);
-  color: var(--text-stronger);
-  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: transparent;
+  color: #ffffff;
+  padding: 0;
   border-radius: 999px;
   font-size: 12px;
   cursor: pointer;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .composer-send:hover {
   background: var(--surface-control-hover);
-  color: var(--text-strong);
+  color: #ffffff;
+}
+
+.composer-send svg {
+  width: 12px;
+  height: 12px;
 }
 
 .composer-stop {
   border: 1px solid rgba(255, 107, 107, 0.6);
   background: rgba(255, 107, 107, 0.12);
-  color: rgba(255, 196, 196, 0.9);
-  padding: 8px 12px;
+  color: #ffffff;
+  padding: 0;
   border-radius: 999px;
-  font-size: 12px;
   cursor: pointer;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .composer-stop:hover {
   background: rgba(255, 107, 107, 0.2);
-  color: #fff;
+}
+
+.composer-stop-square {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: currentColor;
 }
 
 .composer.is-disabled {
@@ -132,6 +152,7 @@
   cursor: not-allowed;
   background: var(--surface-control-disabled);
   color: var(--text-fainter);
+  border-color: var(--border-subtle);
 }
 
 .composer-stop:disabled {

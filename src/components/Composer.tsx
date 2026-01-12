@@ -171,14 +171,23 @@ export function Composer({
           disabled={disabled || !canStop}
           aria-label="Stop"
         >
-          Stop
+          <span className="composer-stop-square" aria-hidden />
         </button>
         <button
           className="composer-send"
           onClick={handleSend}
           disabled={disabled}
+          aria-label={sendLabel}
         >
-          {sendLabel}
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M12 5l6 6m-6-6L6 11m6-6v14"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
         </button>
       </div>
       <div className="composer-bar">
