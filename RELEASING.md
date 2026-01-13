@@ -1,119 +1,49 @@
 # Releasing CodexMonitor (macOS)
 
-This guide is written for fresh agents and humans. It assumes the machine has
-no access to private keys by default. Signing and notarization require the
-Developer ID certificate and notarization credentials, which must be provided
-by a human.
-
-## Prereqs (Human-Provided)
-
-- Apple Developer account with Team ID.
-- Developer ID Application certificate installed in Keychain.
-- Notarization credentials for `notarytool`:
-  - Apple ID + app-specific password, or
-  - App Store Connect API key.
-
-## Versioning
-
-Read the current version and decide the next release tag:
+This is a copy/paste friendly script-style guide. It assumes you have a
+Developer ID Application certificate installed and a `notarytool` keychain
+profile named `codexmonitor-notary`.
 
 ```bash
-cat src-tauri/tauri.conf.json
-cat package.json
-```
+set -euo pipefail
 
-Bump both to the release version before building. After the release is published, bump both to the next minor.
+# --- Set versions ---
+# Update these two values each release.
+RELEASE_VERSION="0.4.3"
+PREV_VERSION="0.4.2"
 
-## Build (Signed for Updater)
-
-The updater requires signing artifacts during the build. Export the private key
-before `tauri build`:
-
-```bash
-export TAURI_SIGNING_PRIVATE_KEY=~/.tauri/codexmonitor.key
-# optional if you set a password
-export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
-```
-
-```bash
+# --- Update version fields (manual check afterwards) ---
+perl -pi -e "s/\"version\": \"[^\"]+\"/\"version\": \"${RELEASE_VERSION}\"/" package.json
+perl -pi -e "s/\"version\": \"[^\"]+\"/\"version\": \"${RELEASE_VERSION}\"/" src-tauri/tauri.conf.json
 npm install
-npm run tauri build
-```
 
-The app bundle is produced at:
+# --- Commit + push version bump ---
+git add package.json package-lock.json src-tauri/tauri.conf.json
+git commit -m "chore: bump version to ${RELEASE_VERSION}"
+git push origin main
 
-```
-src-tauri/target/release/bundle/macos/CodexMonitor.app
-```
+# --- Build (signed for updater) ---
+export TAURI_SIGNING_PRIVATE_KEY=~/.tauri/codexmonitor.key
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="release"
+npm run tauri -- build --bundles app
 
-## Bundle OpenSSL (Required for distribution)
-
-The app links to OpenSSL. Bundle and re-sign the OpenSSL dylibs:
-
-```bash
-CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+# --- Bundle OpenSSL + re-sign app ---
+CODESIGN_IDENTITY="Developer ID Application: Thomas Ricouard (Z6P74P6T99)" \
   scripts/macos-fix-openssl.sh
-```
 
-## Sign + Notarize + Staple (Human Step)
-
-1) Confirm signing identity (from Keychain):
-
-```bash
-security find-identity -v -p codesigning
-```
-
-2) Zip the app:
-
-```bash
+# --- Zip, notarize, staple ---
 ditto -c -k --keepParent \
   src-tauri/target/release/bundle/macos/CodexMonitor.app \
   CodexMonitor.zip
-```
 
-3) Store notary credentials (one-time per machine):
-
-```bash
-xcrun notarytool store-credentials codexmonitor-notary \
-  --apple-id "you@apple.com" \
-  --team-id "TEAMID" \
-  --password "app-specific-password"
-```
-
-If the profile already exists in Keychain, reuse it:
-
-```bash
---keychain-profile "codexmonitor-notary"
-```
-
-Validate the profile (works even if listing is unsupported):
-
-```bash
-xcrun notarytool history --keychain-profile "codexmonitor-notary"
-```
-
-4) Submit for notarization and wait:
-
-```bash
 xcrun notarytool submit CodexMonitor.zip \
-  --keychain-profile "codexmonitor-notary" \
+  --keychain-profile codexmonitor-notary \
   --wait
-```
 
-5) Staple the app:
-
-```bash
 xcrun stapler staple \
   src-tauri/target/release/bundle/macos/CodexMonitor.app
-```
 
-## Package Release Artifacts
-
-Note: Tauri's DMG bundling can fail if the generated `bundle_dmg.sh` script
-is invoked without arguments. The manual packaging flow below is the fallback
-and is the expected path if that happens.
-
-```bash
+# --- Package ZIP + DMG from stapled app ---
 mkdir -p release-artifacts release-artifacts/dmg-root
 rm -rf release-artifacts/dmg-root/CodexMonitor.app
 ditto src-tauri/target/release/bundle/macos/CodexMonitor.app \
@@ -126,90 +56,61 @@ ditto -c -k --keepParent \
 hdiutil create -volname "CodexMonitor" \
   -srcfolder release-artifacts/dmg-root \
   -ov -format UDZO \
-  release-artifacts/CodexMonitor_<RELEASE_VERSION>_aarch64.dmg
-```
+  release-artifacts/CodexMonitor_${RELEASE_VERSION}_aarch64.dmg
 
-## Rebuild Updater Bundle (After Stapling)
-
-After stapling, rebuild the updater tarball and re-sign it so the signature
-matches the stapled app:
-
-```bash
-tar -czf src-tauri/target/release/bundle/macos/CodexMonitor.app.tar.gz \
+# --- Rebuild updater tarball without AppleDouble files ---
+COPYFILE_DISABLE=1 tar -czf \
+  src-tauri/target/release/bundle/macos/CodexMonitor.app.tar.gz \
   -C src-tauri/target/release/bundle/macos CodexMonitor.app
 
 npm run tauri signer sign -- \
   -f ~/.tauri/codexmonitor.key \
-  -p "<PASSWORD_IF_SET>" \
+  -p "release" \
   src-tauri/target/release/bundle/macos/CodexMonitor.app.tar.gz
-```
 
-## Generate Changelog (from git log)
+# --- Changelog (for release notes) ---
+git log --name-only --pretty=format:"%h %s" v${PREV_VERSION}..v${RELEASE_VERSION}
 
-Create release notes from the tag range using plain git log:
+# --- Tag ---
+git tag v${RELEASE_VERSION}
+git push origin v${RELEASE_VERSION}
 
-```bash
-git log --name-only --pretty=format:"%h %s" v<PREV_VERSION>..v<RELEASE_VERSION>
-```
+# --- Build latest.json for updater ---
+PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+SIGNATURE=$(cat src-tauri/target/release/bundle/macos/CodexMonitor.app.tar.gz.sig)
 
-Summarize user-facing changes into short bullet points and use them in the GitHub release notes.
-
-## Tag, Release, and Updater Manifest (with gh)
-
-Tag first so the changelog is tied to the release tag:
-
-```bash
-git tag v<RELEASE_VERSION>
-git push origin v<RELEASE_VERSION>
-```
-
-Create the GitHub release with artifacts:
-
-```bash
-gh release create v<RELEASE_VERSION> \
-  --title "v<RELEASE_VERSION>" \
-  --notes "Signed + notarized macOS release." \
-  release-artifacts/CodexMonitor.zip \
-  release-artifacts/CodexMonitor_<RELEASE_VERSION>_aarch64.dmg
-```
-
-Generate `latest.json` for the Tauri updater and upload it alongside the
-signed artifacts. The updater manifest should include short notes and point at
-the released artifacts + signatures.
-
-```json
+cat <<EOF > release-artifacts/latest.json
 {
-  "version": "<RELEASE_VERSION>",
-  "notes": "- Short update notes\n- Keep it brief",
-  "pub_date": "2025-01-01T12:00:00Z",
+  "version": "${RELEASE_VERSION}",
+  "notes": "- Short update notes",
+  "pub_date": "${PUB_DATE}",
   "platforms": {
     "darwin-aarch64": {
-      "url": "https://github.com/Dimillian/CodexMonitor/releases/download/v<RELEASE_VERSION>/CodexMonitor.app.tar.gz",
-      "signature": "<BASE64_SIGNATURE>"
+      "url": "https://github.com/Dimillian/CodexMonitor/releases/download/v${RELEASE_VERSION}/CodexMonitor.app.tar.gz",
+      "signature": "${SIGNATURE}"
     }
   }
 }
-```
+EOF
 
-Signatures are generated during the build and emitted as `.sig` files next to
-the bundles. Upload both the `.sig` files and `latest.json` to the same release:
-
-```bash
-gh release upload v<RELEASE_VERSION> \
+# --- Create GitHub release with artifacts ---
+gh release create v${RELEASE_VERSION} \
+  --title "v${RELEASE_VERSION}" \
+  --notes "- Short update notes" \
   release-artifacts/CodexMonitor.zip \
-  release-artifacts/CodexMonitor_<RELEASE_VERSION>_aarch64.dmg \
+  release-artifacts/CodexMonitor_${RELEASE_VERSION}_aarch64.dmg \
   src-tauri/target/release/bundle/macos/CodexMonitor.app.tar.gz \
   src-tauri/target/release/bundle/macos/CodexMonitor.app.tar.gz.sig \
-  latest.json \
+  release-artifacts/latest.json
+
+# --- If you need to update assets later ---
+gh release upload v${RELEASE_VERSION} \
+  src-tauri/target/release/bundle/macos/CodexMonitor.app.tar.gz \
+  src-tauri/target/release/bundle/macos/CodexMonitor.app.tar.gz.sig \
+  release-artifacts/latest.json \
   --clobber
 ```
 
-After uploading, edit the GitHub release notes to use the changelog summary.
-
-## Notes
-
-- Signing/notarization cannot be performed without the Developer ID certificate
-  and notarization credentials.
-- If the app fails to launch on another machine, verify OpenSSL is bundled:
-  `otool -L .../CodexMonitor.app/Contents/MacOS/codex-monitor` should show
-  `@rpath/libssl.3.dylib` and `@rpath/libcrypto.3.dylib`.
+Notes:
+- Never commit `~/.tauri/codexmonitor.key`.
+- If notarization fails, run `xcrun notarytool log <ID> --keychain-profile codexmonitor-notary`.
