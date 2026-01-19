@@ -1059,6 +1059,7 @@ export class ClaudeSession {
       this.currentTurnId = null;
       this.currentThreadId = null;
       this.currentReasoningItemId = null;
+      this.currentReasoningBlockIndex = null;
       this.abortController = null;
       this.activeQuery = null;
     }
