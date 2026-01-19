@@ -19,7 +19,24 @@ interface ClaudeQueryOptions {
     allowedTools?: string[];
     model?: string;
     cwd?: string;
-    permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
+    permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk';
+    // System prompt configuration - use preset for Claude Code behavior
+    systemPrompt?:
+      | string
+      | {
+          type: 'preset';
+          preset: 'claude_code';
+          append?: string;
+        };
+    // Tools configuration - use preset for Claude Code tools
+    tools?:
+      | string[]
+      | {
+          type: 'preset';
+          preset: 'claude_code';
+        };
+    // Setting sources to load (needed for CLAUDE.md)
+    settingSources?: Array<'user' | 'project' | 'local'>;
   };
   resume?: string;
 }
@@ -179,6 +196,18 @@ export class ClaudeSession {
           model: params.model,
           // Map approval policy to permission mode
           permissionMode: params.approvalPolicy === 'never' ? 'bypassPermissions' : 'default',
+          // Use Claude Code's default system prompt for full Claude Code behavior
+          systemPrompt: {
+            type: 'preset',
+            preset: 'claude_code',
+          },
+          // Use Claude Code's default tools (Bash, Read, Edit, Write, Glob, Grep, etc.)
+          tools: {
+            type: 'preset',
+            preset: 'claude_code',
+          },
+          // Load settings from user, project, and local sources (enables CLAUDE.md)
+          settingSources: ['user', 'project', 'local'],
         },
         // Resume from existing session if available
         resume: session.sessionId !== session.threadId ? session.sessionId : undefined,

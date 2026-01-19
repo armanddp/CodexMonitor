@@ -426,7 +426,9 @@ impl Default for AppSettings {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppSettings, BackendMode, WorkspaceEntry, WorkspaceKind, WorkspaceSettings};
+    use super::{
+        AppSettings, BackendMode, ProviderType, WorkspaceEntry, WorkspaceKind, WorkspaceSettings,
+    };
 
     #[test]
     fn app_settings_defaults_from_empty_json() {
@@ -480,5 +482,59 @@ mod tests {
         assert!(settings.sort_order.is_none());
         assert!(settings.group_id.is_none());
         assert!(settings.git_root.is_none());
+    }
+
+    #[test]
+    fn provider_type_default_is_codex() {
+        let provider = ProviderType::default();
+        assert!(matches!(provider, ProviderType::Codex));
+    }
+
+    #[test]
+    fn provider_type_serializes_lowercase() {
+        let codex = ProviderType::Codex;
+        let claude = ProviderType::Claude;
+        assert_eq!(
+            serde_json::to_string(&codex).unwrap(),
+            "\"codex\""
+        );
+        assert_eq!(
+            serde_json::to_string(&claude).unwrap(),
+            "\"claude\""
+        );
+    }
+
+    #[test]
+    fn provider_type_deserializes_lowercase() {
+        let codex: ProviderType = serde_json::from_str("\"codex\"").unwrap();
+        let claude: ProviderType = serde_json::from_str("\"claude\"").unwrap();
+        assert!(matches!(codex, ProviderType::Codex));
+        assert!(matches!(claude, ProviderType::Claude));
+    }
+
+    #[test]
+    fn provider_type_display() {
+        assert_eq!(format!("{}", ProviderType::Codex), "codex");
+        assert_eq!(format!("{}", ProviderType::Claude), "claude");
+    }
+
+    #[test]
+    fn workspace_settings_provider_type_defaults_to_codex() {
+        let settings = WorkspaceSettings::default();
+        assert!(matches!(settings.provider_type, ProviderType::Codex));
+    }
+
+    #[test]
+    fn workspace_settings_with_claude_provider() {
+        let json = r#"{"sidebarCollapsed":false,"providerType":"claude"}"#;
+        let settings: WorkspaceSettings = serde_json::from_str(json).unwrap();
+        assert!(matches!(settings.provider_type, ProviderType::Claude));
+    }
+
+    #[test]
+    fn app_settings_claude_bin_field() {
+        let json = r#"{"claudeBin":"/usr/local/bin/claude"}"#;
+        let settings: AppSettings = serde_json::from_str(json).expect("settings deserialize");
+        assert_eq!(settings.claude_bin, Some("/usr/local/bin/claude".to_string()));
     }
 }

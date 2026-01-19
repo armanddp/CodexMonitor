@@ -149,6 +149,25 @@ pub async fn check_node_installation() -> Result<Option<String>, String> {
     })
 }
 
+/// Build a JSON-RPC request message
+fn build_request_message(id: u64, method: &str, params: Value) -> Value {
+    json!({ "id": id, "method": method, "params": params })
+}
+
+/// Build a JSON-RPC notification message
+fn build_notification_message(method: &str, params: Option<Value>) -> Value {
+    if let Some(params) = params {
+        json!({ "method": method, "params": params })
+    } else {
+        json!({ "method": method })
+    }
+}
+
+/// Build a JSON-RPC response message
+fn build_response_message(id: u64, result: Value) -> Value {
+    json!({ "id": id, "result": result })
+}
+
 /// Spawn a Claude bridge session for a workspace
 pub async fn spawn_claude_session<E: EventSink>(
     entry: WorkspaceEntry,
@@ -297,4 +316,63 @@ pub async fn spawn_claude_session<E: EventSink>(
     event_sink.emit_app_server_event(payload);
 
     Ok(session)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_request_message_structure() {
+        let msg = build_request_message(1, "test/method", json!({"key": "value"}));
+        assert_eq!(msg["id"], 1);
+        assert_eq!(msg["method"], "test/method");
+        assert_eq!(msg["params"]["key"], "value");
+    }
+
+    #[test]
+    fn build_notification_with_params() {
+        let msg = build_notification_message("test/notify", Some(json!({"data": 42})));
+        assert_eq!(msg["method"], "test/notify");
+        assert_eq!(msg["params"]["data"], 42);
+        assert!(msg.get("id").is_none());
+    }
+
+    #[test]
+    fn build_notification_without_params() {
+        let msg = build_notification_message("test/notify", None);
+        assert_eq!(msg["method"], "test/notify");
+        assert!(msg.get("params").is_none());
+        assert!(msg.get("id").is_none());
+    }
+
+    #[test]
+    fn build_response_message_structure() {
+        let msg = build_response_message(42, json!({"success": true}));
+        assert_eq!(msg["id"], 42);
+        assert_eq!(msg["result"]["success"], true);
+        assert!(msg.get("method").is_none());
+    }
+
+    #[test]
+    fn find_claude_bridge_returns_dev_path_without_app_root() {
+        let path = find_claude_bridge(None);
+        assert_eq!(path, PathBuf::from("src-nodejs/dist/index.js"));
+    }
+
+    #[test]
+    fn find_claude_bridge_checks_bundled_first() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        // Create a temp directory with the bundled path
+        let temp_dir = TempDir::new().unwrap();
+        let bundled_dir = temp_dir.path().join("claude-bridge");
+        fs::create_dir_all(&bundled_dir).unwrap();
+        let bundled_path = bundled_dir.join("index.js");
+        fs::write(&bundled_path, "// test").unwrap();
+
+        let path = find_claude_bridge(Some(temp_dir.path()));
+        assert_eq!(path, bundled_path);
+    }
 }
