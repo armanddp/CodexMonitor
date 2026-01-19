@@ -40,16 +40,10 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
-    "resources": [
-      {
-        "src": "../src-nodejs/dist",
-        "target": "claude-bridge/dist"
-      },
-      {
-        "src": "../src-nodejs/node_modules/@anthropic-ai/claude-agent-sdk",
-        "target": "claude-bridge/node_modules/@anthropic-ai/claude-agent-sdk"
-      }
-    ],
+    "resources": {
+      "../src-nodejs/dist": "claude-bridge/dist",
+      "../src-nodejs/node_modules/@anthropic-ai/claude-agent-sdk": "claude-bridge/node_modules/@anthropic-ai/claude-agent-sdk"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
