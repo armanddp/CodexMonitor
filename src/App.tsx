@@ -1611,10 +1611,15 @@ function MainApp() {
           onUpdateWorkspaceProviderType={async (id, providerType: ProviderType) => {
             const workspace = workspaces.find((w) => w.id === id);
             if (workspace) {
-              await updateWorkspaceSettings(id, {
+              // Update settings with new provider type
+              const updated = await updateWorkspaceSettings(id, {
                 ...workspace.settings,
                 providerType,
               });
+              // Reconnect to use the new provider
+              if (updated.connected) {
+                await connectWorkspace(updated);
+              }
             }
           }}
           scaleShortcutTitle={scaleShortcutTitle}
