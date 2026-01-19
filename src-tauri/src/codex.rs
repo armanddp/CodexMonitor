@@ -8,11 +8,12 @@ use tauri::{AppHandle, State};
 use tokio::process::Command;
 use tokio::time::timeout;
 
-pub(crate) use crate::backend::app_server::WorkspaceSession;
 use crate::backend::app_server::{
     build_codex_command_with_bin, build_codex_path_env, check_codex_installation,
     spawn_workspace_session as spawn_workspace_session_inner,
 };
+use crate::backend::codex_provider::CodexProvider;
+use crate::backend::provider::ProviderSession;
 use crate::event_sink::TauriEventSink;
 use crate::state::AppState;
 use crate::types::WorkspaceEntry;
@@ -22,17 +23,21 @@ pub(crate) async fn spawn_workspace_session(
     default_codex_bin: Option<String>,
     app_handle: AppHandle,
     codex_home: Option<PathBuf>,
-) -> Result<Arc<WorkspaceSession>, String> {
+) -> Result<ProviderSession, String> {
     let client_version = app_handle.package_info().version.to_string();
     let event_sink = TauriEventSink::new(app_handle);
-    spawn_workspace_session_inner(
+    let session = spawn_workspace_session_inner(
         entry,
         default_codex_bin,
         client_version,
         event_sink,
         codex_home,
     )
-    .await
+    .await?;
+
+    // Wrap the session in a CodexProvider
+    let provider = CodexProvider::new(session);
+    Ok(Arc::new(provider))
 }
 
 #[tauri::command]
@@ -137,7 +142,7 @@ pub(crate) async fn start_thread(
         .get(&workspace_id)
         .ok_or("workspace not connected")?;
     let params = json!({
-        "cwd": session.entry.path,
+        "cwd": session.workspace_entry().path,
         "approvalPolicy": "on-request"
     });
     session.send_request("thread/start", params).await
@@ -209,6 +214,7 @@ pub(crate) async fn send_user_message(
     let session = sessions
         .get(&workspace_id)
         .ok_or("workspace not connected")?;
+    let workspace_path = &session.workspace_entry().path;
     let access_mode = access_mode.unwrap_or_else(|| "current".to_string());
     let sandbox_policy = match access_mode.as_str() {
         "full-access" => json!({
@@ -219,7 +225,7 @@ pub(crate) async fn send_user_message(
         }),
         _ => json!({
             "type": "workspaceWrite",
-            "writableRoots": [session.entry.path],
+            "writableRoots": [workspace_path],
             "networkAccess": true
         }),
     };
@@ -258,7 +264,7 @@ pub(crate) async fn send_user_message(
     let params = json!({
         "threadId": thread_id,
         "input": input,
-        "cwd": session.entry.path,
+        "cwd": workspace_path,
         "approvalPolicy": approval_policy,
         "sandboxPolicy": sandbox_policy,
         "model": model,
@@ -360,7 +366,7 @@ pub(crate) async fn skills_list(
         .get(&workspace_id)
         .ok_or("workspace not connected")?;
     let params = json!({
-        "cwd": session.entry.path
+        "cwd": session.workspace_entry().path
     });
     session.send_request("skills/list", params).await
 }

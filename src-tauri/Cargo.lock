@@ -566,6 +566,7 @@ dependencies = [
 name = "codex-monitor"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "cpal",
  "fix-path-env",

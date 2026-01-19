@@ -225,12 +225,16 @@ pub(crate) struct WorkspaceSettings {
     pub(crate) group_id: Option<String>,
     #[serde(default, rename = "gitRoot")]
     pub(crate) git_root: Option<String>,
+    #[serde(default, rename = "providerType")]
+    pub(crate) provider_type: ProviderType,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct AppSettings {
     #[serde(default, rename = "codexBin")]
     pub(crate) codex_bin: Option<String>,
+    #[serde(default, rename = "claudeBin")]
+    pub(crate) claude_bin: Option<String>,
     #[serde(default, rename = "backendMode")]
     pub(crate) backend_mode: BackendMode,
     #[serde(default = "default_remote_backend_host", rename = "remoteBackendHost")]
@@ -311,6 +315,31 @@ impl Default for BackendMode {
     }
 }
 
+/// Agent provider type - determines which backend to use for AI interactions
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderType {
+    /// OpenAI Codex via codex app-server
+    Codex,
+    /// Anthropic Claude via Claude Agent SDK
+    Claude,
+}
+
+impl Default for ProviderType {
+    fn default() -> Self {
+        ProviderType::Codex
+    }
+}
+
+impl std::fmt::Display for ProviderType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProviderType::Codex => write!(f, "codex"),
+            ProviderType::Claude => write!(f, "claude"),
+        }
+    }
+}
+
 fn default_access_mode() -> String {
     "current".to_string()
 }
@@ -371,6 +400,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             codex_bin: None,
+            claude_bin: None,
             backend_mode: BackendMode::Local,
             remote_backend_host: default_remote_backend_host(),
             remote_backend_token: None,
