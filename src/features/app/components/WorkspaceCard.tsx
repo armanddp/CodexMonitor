@@ -53,6 +53,9 @@ export function WorkspaceCard({
           <div className="workspace-name-row">
             <div className="workspace-title">
               <span className="workspace-name">{workspace.name}</span>
+              {workspace.settings.providerType === "claude" && (
+                <span className="workspace-provider-badge">Claude</span>
+              )}
               <button
                 className={`workspace-toggle ${isCollapsed ? "" : "expanded"}`}
                 onClick={(event) => {

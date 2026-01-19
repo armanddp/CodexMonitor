@@ -259,6 +259,17 @@
   font-size: 14px;
 }
 
+.workspace-provider-badge {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--surface-subtle);
+  padding: 1px 5px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 
 .connect {
   font-size: 12px;

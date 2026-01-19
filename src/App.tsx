@@ -92,6 +92,7 @@ import {
 import type {
   AccessMode,
   GitHubPullRequest,
+  ProviderType,
   QueuedMessage,
   WorkspaceInfo,
 } from "./types";
@@ -1606,6 +1607,15 @@ function MainApp() {
           onRunDoctor={doctor}
           onUpdateWorkspaceCodexBin={async (id, codexBin) => {
             await updateWorkspaceCodexBin(id, codexBin);
+          }}
+          onUpdateWorkspaceProviderType={async (id, providerType: ProviderType) => {
+            const workspace = workspaces.find((w) => w.id === id);
+            if (workspace) {
+              await updateWorkspaceSettings(id, {
+                ...workspace.settings,
+                providerType,
+              });
+            }
           }}
           scaleShortcutTitle={scaleShortcutTitle}
           scaleShortcutText={scaleShortcutText}

@@ -17,6 +17,7 @@ import type {
   AppSettings,
   CodexDoctorResult,
   DictationModelStatus,
+  ProviderType,
   WorkspaceGroup,
   WorkspaceInfo,
 } from "../../../types";
@@ -57,6 +58,7 @@ type SettingsViewProps = {
   onUpdateAppSettings: (next: AppSettings) => Promise<void>;
   onRunDoctor: (codexBin: string | null) => Promise<CodexDoctorResult>;
   onUpdateWorkspaceCodexBin: (id: string, codexBin: string | null) => Promise<void>;
+  onUpdateWorkspaceProviderType: (id: string, providerType: ProviderType) => Promise<void>;
   scaleShortcutTitle: string;
   scaleShortcutText: string;
   onTestNotificationSound: () => void;
@@ -88,6 +90,7 @@ export function SettingsView({
   onUpdateAppSettings,
   onRunDoctor,
   onUpdateWorkspaceCodexBin,
+  onUpdateWorkspaceProviderType,
   scaleShortcutTitle,
   scaleShortcutText,
   onTestNotificationSound,
@@ -99,6 +102,7 @@ export function SettingsView({
 }: SettingsViewProps) {
   const [activeSection, setActiveSection] = useState<CodexSection>("projects");
   const [codexPathDraft, setCodexPathDraft] = useState(appSettings.codexBin ?? "");
+  const [claudePathDraft, setClaudePathDraft] = useState(appSettings.claudeBin ?? "");
   const [remoteHostDraft, setRemoteHostDraft] = useState(appSettings.remoteBackendHost);
   const [remoteTokenDraft, setRemoteTokenDraft] = useState(appSettings.remoteBackendToken ?? "");
   const [scaleDraft, setScaleDraft] = useState(
@@ -136,6 +140,10 @@ export function SettingsView({
   useEffect(() => {
     setCodexPathDraft(appSettings.codexBin ?? "");
   }, [appSettings.codexBin]);
+
+  useEffect(() => {
+    setClaudePathDraft(appSettings.claudeBin ?? "");
+  }, [appSettings.claudeBin]);
 
   useEffect(() => {
     setRemoteHostDraft(appSettings.remoteBackendHost);
@@ -191,6 +199,9 @@ export function SettingsView({
   const codexDirty =
     (codexPathDraft.trim() || null) !== (appSettings.codexBin ?? null);
 
+  const claudeDirty =
+    (claudePathDraft.trim() || null) !== (appSettings.claudeBin ?? null);
+
   const trimmedScale = scaleDraft.trim();
   const parsedPercent = trimmedScale
     ? Number(trimmedScale.replace("%", ""))
@@ -203,6 +214,18 @@ export function SettingsView({
       await onUpdateAppSettings({
         ...appSettings,
         codexBin: codexPathDraft.trim() ? codexPathDraft.trim() : null,
+      });
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const handleSaveClaudeSettings = async () => {
+    setIsSavingSettings(true);
+    try {
+      await onUpdateAppSettings({
+        ...appSettings,
+        claudeBin: claudePathDraft.trim() ? claudePathDraft.trim() : null,
       });
     } finally {
       setIsSavingSettings(false);
@@ -267,6 +290,14 @@ export function SettingsView({
       return;
     }
     setCodexPathDraft(selection);
+  };
+
+  const handleBrowseClaude = async () => {
+    const selection = await open({ multiple: false, directory: false });
+    if (!selection || Array.isArray(selection)) {
+      return;
+    }
+    setClaudePathDraft(selection);
   };
 
   const handleRunDoctor = async () => {
@@ -1115,6 +1146,46 @@ export function SettingsView({
               </div>
 
                 <div className="settings-field">
+                  <label className="settings-field-label" htmlFor="claude-path">
+                    Claude CLI path
+                  </label>
+                  <div className="settings-field-row">
+                    <input
+                      id="claude-path"
+                      className="settings-input"
+                      value={claudePathDraft}
+                      placeholder="claude"
+                      onChange={(event) => setClaudePathDraft(event.target.value)}
+                    />
+                    <button type="button" className="ghost" onClick={handleBrowseClaude}>
+                      Browse
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setClaudePathDraft("")}
+                    >
+                      Use PATH
+                    </button>
+                  </div>
+                  <div className="settings-help">
+                    Path to Claude Code CLI. Leave empty to use the system PATH resolution.
+                  </div>
+                  <div className="settings-field-actions">
+                    {claudeDirty && (
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={handleSaveClaudeSettings}
+                        disabled={isSavingSettings}
+                      >
+                        {isSavingSettings ? "Saving..." : "Save"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="settings-field">
                   <label className="settings-field-label" htmlFor="default-access">
                     Default access mode
                   </label>
@@ -1204,6 +1275,9 @@ export function SettingsView({
 
                 <div className="settings-field">
                   <div className="settings-field-label">Workspace overrides</div>
+                  <div className="settings-subsection-subtitle">
+                    Configure provider and CLI path per workspace.
+                  </div>
                   <div className="settings-overrides">
                     {projects.map((workspace) => (
                       <div key={workspace.id} className="settings-override-row">
@@ -1212,10 +1286,24 @@ export function SettingsView({
                           <div className="settings-project-path">{workspace.path}</div>
                         </div>
                         <div className="settings-override-actions">
+                          <select
+                            className="settings-select settings-select--compact"
+                            value={workspace.settings.providerType}
+                            onChange={(event) => {
+                              void onUpdateWorkspaceProviderType(
+                                workspace.id,
+                                event.target.value as ProviderType,
+                              );
+                            }}
+                            aria-label="Agent provider"
+                          >
+                            <option value="codex">Codex</option>
+                            <option value="claude">Claude</option>
+                          </select>
                           <input
                             className="settings-input settings-input--compact"
                             value={overrideDrafts[workspace.id] ?? ""}
-                            placeholder="Use default"
+                            placeholder="CLI path override"
                             onChange={(event) =>
                               setOverrideDrafts((prev) => ({
                                 ...prev,
