@@ -669,7 +669,7 @@ export class ClaudeSession {
   /**
    * Start a new turn (send message to Claude)
    */
-  async startTurn(params: TurnStartParams): Promise<{ turnId: string }> {
+  async startTurn(params: TurnStartParams): Promise<{ turn: { id: string } }> {
     await this.ensureLoaded();
     const session = this.sessions.get(params.threadId);
     if (!session) {
@@ -716,7 +716,7 @@ export class ClaudeSession {
       this.rpc.notify(payload.method, payload.params);
     });
 
-    return { turnId };
+    return { turn: { id: turnId } };
   }
 
   /**

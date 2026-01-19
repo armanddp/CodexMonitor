@@ -122,7 +122,7 @@ class ClaudeBridge {
     this.rpc.onRequest('model/list', async () => {
       this.ensureInitialized();
       return {
-        models: [
+        data: [
           { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', default: true },
           { id: 'claude-opus-4-20250514', name: 'Claude Opus 4' },
           { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku' },
