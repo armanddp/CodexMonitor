@@ -16,6 +16,8 @@ import { JsonRpcHandler } from './rpc.js';
 import { ClaudeSession } from './claude-session.js';
 import type {
   InitializeParams,
+  ThreadListParams,
+  ThreadArchiveParams,
   ThreadStartParams,
   ThreadResumeParams,
   TurnStartParams,
@@ -34,7 +36,14 @@ class ClaudeBridge {
 
   constructor() {
     this.rpc = new JsonRpcHandler();
-    this.session = new ClaudeSession(this.rpc);
+    const workspaceId = process.env.CODEX_MONITOR_WORKSPACE_ID ?? 'default';
+    const dataDir = process.env.CODEX_MONITOR_DATA_DIR ?? null;
+    const claudeCodePath = process.env.CODEX_MONITOR_CLAUDE_PATH ?? null;
+    this.session = new ClaudeSession(this.rpc, {
+      workspaceId,
+      dataDir,
+      claudeCodePath,
+    });
     this.registerHandlers();
   }
 
@@ -78,15 +87,21 @@ class ClaudeBridge {
       return this.session.resumeThread(resumeParams.threadId);
     });
 
-    this.rpc.onRequest('thread/list', async () => {
+    this.rpc.onRequest('thread/list', async (params) => {
       this.ensureInitialized();
-      // For now, return empty list - session persistence not yet implemented
-      return { threads: [], cursor: null };
+      const listParams = (params as ThreadListParams | undefined) ?? {};
+      const cursor = listParams.cursor ?? null;
+      const limit =
+        typeof listParams.limit === 'number' && listParams.limit > 0
+          ? listParams.limit
+          : 20;
+      return this.session.listThreads(cursor, limit);
     });
 
-    this.rpc.onRequest('thread/archive', async () => {
+    this.rpc.onRequest('thread/archive', async (params) => {
       this.ensureInitialized();
-      return { success: true };
+      const archiveParams = params as ThreadArchiveParams;
+      return this.session.archiveThread(archiveParams.threadId);
     });
 
     // Turn management

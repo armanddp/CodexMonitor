@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "npm run build:claude-bridge && tsc && vite build",
+    "build:claude-bridge": "npm --prefix src-nodejs install && npm --prefix src-nodejs run build",
     "build:appimage": "NO_STRIP=1 tauri build --bundles appimage",
     "doctor": "sh scripts/doctor.sh",
     "doctor:strict": "sh scripts/doctor.sh --strict",

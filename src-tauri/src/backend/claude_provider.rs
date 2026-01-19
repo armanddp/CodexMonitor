@@ -11,6 +11,7 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{oneshot, Mutex};
 use tokio::time::timeout;
 
+use crate::backend::app_server::build_codex_path_env;
 use crate::backend::events::{AppServerEvent, EventSink};
 use crate::backend::provider::AgentProvider;
 use crate::types::WorkspaceEntry;
@@ -106,7 +107,7 @@ fn find_claude_bridge(app_root: Option<&Path>) -> PathBuf {
 
     if let Some(root) = app_root {
         // Check bundled location
-        let bundled = root.join("claude-bridge").join("index.js");
+        let bundled = root.join("claude-bridge").join("dist").join("index.js");
         if bundled.exists() {
             return bundled;
         }
@@ -118,8 +119,11 @@ fn find_claude_bridge(app_root: Option<&Path>) -> PathBuf {
 }
 
 /// Check if Node.js is available
-pub async fn check_node_installation() -> Result<Option<String>, String> {
+pub async fn check_node_installation(path_env: Option<&str>) -> Result<Option<String>, String> {
     let mut command = Command::new("node");
+    if let Some(path_env) = path_env {
+        command.env("PATH", path_env);
+    }
     command.arg("--version");
     command.stdout(std::process::Stdio::piped());
     command.stderr(std::process::Stdio::piped());
@@ -174,24 +178,40 @@ pub async fn spawn_claude_session<E: EventSink>(
     client_version: String,
     event_sink: E,
     app_root: Option<PathBuf>,
+    claude_bin: Option<String>,
+    data_dir: Option<PathBuf>,
 ) -> Result<Arc<ClaudeSession>, String> {
+    let path_env = build_codex_path_env(claude_bin.as_deref());
     // Check Node.js is available
-    let _ = check_node_installation().await?;
+    let _ = check_node_installation(path_env.as_deref()).await?;
 
     let bridge_path = find_claude_bridge(app_root.as_deref());
     if !bridge_path.exists() {
         return Err(format!(
-            "Claude bridge not found at {}. Run 'npm run build' in src-nodejs/",
+            "Claude bridge not found at {}. Run 'npm --prefix src-nodejs run build'.",
             bridge_path.display()
         ));
     }
 
     let mut command = Command::new("node");
+    if let Some(ref path_env) = path_env {
+        command.env("PATH", path_env);
+    }
     command.arg(&bridge_path);
     command.current_dir(&entry.path);
     command.stdin(std::process::Stdio::piped());
     command.stdout(std::process::Stdio::piped());
     command.stderr(std::process::Stdio::piped());
+    if let Some(ref data_dir) = data_dir {
+        command.env(
+            "CODEX_MONITOR_DATA_DIR",
+            data_dir.to_string_lossy().to_string(),
+        );
+    }
+    command.env("CODEX_MONITOR_WORKSPACE_ID", entry.id.clone());
+    if let Some(ref claude_bin) = claude_bin.filter(|value| !value.trim().is_empty()) {
+        command.env("CODEX_MONITOR_CLAUDE_PATH", claude_bin);
+    }
 
     let mut child = command.spawn().map_err(|e| e.to_string())?;
     let stdin = child.stdin.take().ok_or("missing stdin")?;
@@ -367,7 +387,7 @@ mod tests {
 
         // Create a temp directory with the bundled path
         let temp_dir = TempDir::new().unwrap();
-        let bundled_dir = temp_dir.path().join("claude-bridge");
+        let bundled_dir = temp_dir.path().join("claude-bridge").join("dist");
         fs::create_dir_all(&bundled_dir).unwrap();
         let bundled_path = bundled_dir.join("index.js");
         fs::write(&bundled_path, "// test").unwrap();

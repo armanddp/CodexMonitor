@@ -48,6 +48,15 @@ export interface ThreadResumeParams {
   threadId: string;
 }
 
+export interface ThreadListParams {
+  cursor?: string | null;
+  limit?: number | null;
+}
+
+export interface ThreadArchiveParams {
+  threadId: string;
+}
+
 export interface TurnStartParams {
   threadId: string;
   input: TurnInput[];
@@ -81,7 +90,7 @@ export interface TurnInterruptParams {
  * Session state tracking
  */
 export interface SessionState {
-  sessionId: string;
+  sessionId: string | null;
   threadId: string;
   cwd: string;
   initialized: boolean;

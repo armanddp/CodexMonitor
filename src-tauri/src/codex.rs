@@ -23,6 +23,7 @@ use crate::types::{ProviderType, WorkspaceEntry};
 pub(crate) async fn spawn_workspace_session(
     entry: WorkspaceEntry,
     default_codex_bin: Option<String>,
+    claude_bin: Option<String>,
     app_handle: AppHandle,
     codex_home: Option<PathBuf>,
 ) -> Result<ProviderSession, String> {
@@ -48,8 +49,17 @@ pub(crate) async fn spawn_workspace_session(
                 .path()
                 .resource_dir()
                 .ok();
+            let app_data_dir = app_handle.path().app_data_dir().ok();
 
-            let session = spawn_claude_session(entry, client_version, event_sink, app_root).await?;
+            let session = spawn_claude_session(
+                entry,
+                client_version,
+                event_sink,
+                app_root,
+                claude_bin,
+                app_data_dir,
+            )
+            .await?;
             let provider = ClaudeProvider::new(session);
             Ok(Arc::new(provider))
         }

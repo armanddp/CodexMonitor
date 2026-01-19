@@ -273,12 +273,13 @@ pub(crate) async fn add_workspace(
         settings: WorkspaceSettings::default(),
     };
 
-    let default_bin = {
+    let (default_bin, claude_bin) = {
         let settings = state.app_settings.lock().await;
-        settings.codex_bin.clone()
+        (settings.codex_bin.clone(), settings.claude_bin.clone())
     };
     let codex_home = resolve_codex_home(&entry, None);
-    let session = spawn_workspace_session(entry.clone(), default_bin, app, codex_home).await?;
+    let session =
+        spawn_workspace_session(entry.clone(), default_bin, claude_bin, app, codex_home).await?;
     {
         let mut workspaces = state.workspaces.lock().await;
         workspaces.insert(entry.id.clone(), entry.clone());
@@ -369,12 +370,13 @@ pub(crate) async fn add_worktree(
         settings: WorkspaceSettings::default(),
     };
 
-    let default_bin = {
+    let (default_bin, claude_bin) = {
         let settings = state.app_settings.lock().await;
-        settings.codex_bin.clone()
+        (settings.codex_bin.clone(), settings.claude_bin.clone())
     };
     let codex_home = resolve_codex_home(&entry, Some(&parent_entry.path));
-    let session = spawn_workspace_session(entry.clone(), default_bin, app, codex_home).await?;
+    let session =
+        spawn_workspace_session(entry.clone(), default_bin, claude_bin, app, codex_home).await?;
     {
         let mut workspaces = state.workspaces.lock().await;
         workspaces.insert(entry.id.clone(), entry.clone());
@@ -716,12 +718,13 @@ pub(crate) async fn connect_workspace(
             .ok_or("workspace not found")?
     };
 
-    let default_bin = {
+    let (default_bin, claude_bin) = {
         let settings = state.app_settings.lock().await;
-        settings.codex_bin.clone()
+        (settings.codex_bin.clone(), settings.claude_bin.clone())
     };
     let codex_home = resolve_codex_home(&entry, parent_path.as_deref());
-    let session = spawn_workspace_session(entry.clone(), default_bin, app, codex_home).await?;
+    let session =
+        spawn_workspace_session(entry.clone(), default_bin, claude_bin, app, codex_home).await?;
     state.sessions.lock().await.insert(entry.id, session);
     Ok(())
 }
