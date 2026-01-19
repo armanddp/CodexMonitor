@@ -516,10 +516,27 @@ export class ClaudeSession {
         }
       }
       if (input.type === 'image' && input.url) {
-        blocks.push({
-          type: 'image',
-          source: { type: 'url', url: input.url },
-        });
+        // Handle data URIs by converting to base64 format
+        if (input.url.startsWith('data:')) {
+          const match = input.url.match(/^data:([^;]+);base64,(.+)$/);
+          if (match) {
+            const [, mediaType, base64Data] = match;
+            blocks.push({
+              type: 'image',
+              source: { type: 'base64', data: base64Data, media_type: mediaType },
+            });
+          } else {
+            this.rpc.notify('codex/stderr', {
+              message: `Invalid data URI format: ${input.url.substring(0, 50)}...`,
+            });
+          }
+        } else {
+          // Regular HTTP/HTTPS URLs
+          blocks.push({
+            type: 'image',
+            source: { type: 'url', url: input.url },
+          });
+        }
       }
       if (input.type === 'localImage' && input.path) {
         try {
