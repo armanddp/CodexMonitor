@@ -123,9 +123,24 @@ class ClaudeBridge {
       this.ensureInitialized();
       return {
         data: [
-          { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', default: true },
-          { id: 'claude-opus-4-20250514', name: 'Claude Opus 4' },
-          { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku' },
+          {
+            id: 'claude-sonnet-4-20250514',
+            model: 'claude-sonnet-4-20250514',
+            displayName: 'Claude Sonnet 4',
+            isDefault: true,
+          },
+          {
+            id: 'claude-opus-4-20250514',
+            model: 'claude-opus-4-20250514',
+            displayName: 'Claude Opus 4',
+            isDefault: false,
+          },
+          {
+            id: 'claude-3-5-haiku-20241022',
+            model: 'claude-3-5-haiku-20241022',
+            displayName: 'Claude 3.5 Haiku',
+            isDefault: false,
+          },
         ],
       };
     });
