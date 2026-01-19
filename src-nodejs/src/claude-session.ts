@@ -347,6 +347,7 @@ export class ClaudeSession {
   private currentTurnId: string | null = null;
   private currentThreadId: string | null = null;
   private currentReasoningItemId: string | null = null;
+  private currentReasoningBlockIndex: number | null = null;
   private abortController: AbortController | null = null;
   private approvalRequestId: number = 1;
   private activeQuery: { interrupt?: () => Promise<void> } | null = null;
@@ -762,6 +763,7 @@ export class ClaudeSession {
     this.currentTurnId = turnId;
     this.currentThreadId = params.threadId;
     this.currentReasoningItemId = null;
+    this.currentReasoningBlockIndex = null;
     this.abortController = new AbortController();
 
     const thread = this.getThread(params.threadId, params.cwd);
@@ -1089,9 +1091,31 @@ export class ClaudeSession {
           const delta = event.delta.thinking ?? '';
           if (delta) {
             if (!this.currentReasoningItemId) {
-              this.currentReasoningItemId = randomUUID();
+              // Fallback: create reasoning item if we missed content_block_start
+              const reasoningId = randomUUID();
+              this.currentReasoningItemId = reasoningId;
+              const reasoningItem: StoredItem = {
+                id: reasoningId,
+                type: 'reasoning',
+                summary: '',
+                content: '',
+              };
+              turn.items.push(reasoningItem);
+              this.touchThread(thread);
+              this.rpc.notify('item/started', {
+                threadId: thread.id,
+                turnId,
+                item: reasoningItem,
+              });
             }
             const reasoningId = this.currentReasoningItemId;
+            // Emit both summaryTextDelta (for UI preview) and textDelta (for full content)
+            this.rpc.notify('item/reasoning/summaryTextDelta', {
+              threadId: thread.id,
+              turnId,
+              itemId: reasoningId,
+              delta,
+            });
             this.rpc.notify('item/reasoning/textDelta', {
               threadId: thread.id,
               turnId,
@@ -1105,6 +1129,26 @@ export class ClaudeSession {
       }
       if (event.type === 'content_block_start') {
         const block = event.content_block as { type: string; id?: string; name?: string; input?: unknown };
+        const blockIndex = (event as { index?: number }).index;
+        if (block.type === 'thinking' && this.currentThreadId && this.currentTurnId) {
+          // Start a new reasoning block
+          const reasoningId = randomUUID();
+          this.currentReasoningItemId = reasoningId;
+          this.currentReasoningBlockIndex = blockIndex ?? null;
+          const reasoningItem: StoredItem = {
+            id: reasoningId,
+            type: 'reasoning',
+            summary: '',
+            content: '',
+          };
+          turn.items.push(reasoningItem);
+          this.touchThread(thread);
+          this.rpc.notify('item/started', {
+            threadId: thread.id,
+            turnId,
+            item: reasoningItem,
+          });
+        }
         if (block.type === 'tool_use' && this.currentThreadId && this.currentTurnId) {
           const toolUseId = block.id ?? randomUUID();
           if (!this.toolOutputMethods.has(toolUseId)) {
@@ -1125,6 +1169,30 @@ export class ClaudeSession {
             );
             this.rpc.notify(payload.method, payload.params);
           }
+        }
+      }
+      if (event.type === 'content_block_stop') {
+        const blockIndex = (event as { index?: number }).index;
+        // Check if this is the end of a thinking block
+        if (
+          this.currentReasoningItemId &&
+          this.currentReasoningBlockIndex !== null &&
+          blockIndex === this.currentReasoningBlockIndex &&
+          this.currentThreadId &&
+          this.currentTurnId
+        ) {
+          // Find the reasoning item and emit completed
+          const reasoningItem = turn.items.find(
+            (entry) => entry.id === this.currentReasoningItemId && entry.type === 'reasoning',
+          );
+          if (reasoningItem) {
+            this.rpc.notify('item/completed', {
+              threadId: thread.id,
+              turnId,
+              item: reasoningItem,
+            });
+          }
+          this.currentReasoningBlockIndex = null;
         }
       }
       return null;
