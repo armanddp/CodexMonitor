@@ -78,6 +78,16 @@ type ClaudeSessionConfig = {
   claudeCodePath?: string | null;
 };
 
+type SessionUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  totalCostUsd: number;
+  turnCount: number;
+  startedAt: number;
+};
+
 type ToolStartEvent = {
   method: 'item/started';
   params: {
@@ -344,6 +354,15 @@ export class ClaudeSession {
   private loadPromise: Promise<void> | null = null;
   private workspaceId: string;
   private claudeCodePath: string | null;
+  private sessionUsage: SessionUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    totalCostUsd: 0,
+    turnCount: 0,
+    startedAt: Date.now(),
+  };
 
   constructor(rpc: JsonRpcHandler, config: ClaudeSessionConfig) {
     this.rpc = rpc;
@@ -356,6 +375,52 @@ export class ClaudeSession {
         `${config.workspaceId}.json`,
       );
     }
+  }
+
+  /**
+   * Get current rate limits snapshot for the session
+   */
+  getRateLimits(): Record<string, unknown> {
+    const usage = this.sessionUsage;
+    const totalTokens = usage.inputTokens + usage.outputTokens;
+    // Use a reasonable session budget for percentage calculation (1M tokens)
+    const sessionBudget = 1_000_000;
+    const usedPercent = Math.min((totalTokens / sessionBudget) * 100, 100);
+
+    return {
+      primary: {
+        usedPercent,
+        windowDurationMins: null,
+        resetsAt: null,
+      },
+      secondary: null,
+      credits: {
+        hasCredits: true,
+        unlimited: false,
+        balance: `$${usage.totalCostUsd.toFixed(4)}`,
+      },
+      planType: 'claude-api',
+      // Additional Claude-specific stats
+      usage: {
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cacheReadTokens: usage.cacheReadTokens,
+        cacheCreationTokens: usage.cacheCreationTokens,
+        totalTokens,
+        totalCostUsd: usage.totalCostUsd,
+        turnCount: usage.turnCount,
+        sessionDurationMs: Date.now() - usage.startedAt,
+      },
+    };
+  }
+
+  /**
+   * Emit rate limits update notification
+   */
+  private emitRateLimitsUpdate(): void {
+    this.rpc.notify('account/rateLimits/updated', {
+      rateLimits: this.getRateLimits(),
+    });
   }
 
   private async ensureLoaded(): Promise<void> {
@@ -1094,6 +1159,52 @@ export class ClaudeSession {
         const payload = buildTurnErrorEvent(thread.id, turnId, errorText);
         this.rpc.notify(payload.method, payload.params);
       }
+
+      // Extract usage information from successful results
+      if (message.subtype === 'success') {
+        const result = message as {
+          usage?: {
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_read_input_tokens?: number;
+            cache_creation_input_tokens?: number;
+          };
+          modelUsage?: Record<
+            string,
+            {
+              inputTokens?: number;
+              outputTokens?: number;
+              cacheReadInputTokens?: number;
+              cacheCreationInputTokens?: number;
+            }
+          >;
+          total_cost_usd?: number;
+        };
+
+        // Aggregate usage from modelUsage (more detailed) or fallback to usage
+        if (result.modelUsage) {
+          for (const modelStats of Object.values(result.modelUsage)) {
+            this.sessionUsage.inputTokens += modelStats.inputTokens ?? 0;
+            this.sessionUsage.outputTokens += modelStats.outputTokens ?? 0;
+            this.sessionUsage.cacheReadTokens += modelStats.cacheReadInputTokens ?? 0;
+            this.sessionUsage.cacheCreationTokens += modelStats.cacheCreationInputTokens ?? 0;
+          }
+        } else if (result.usage) {
+          this.sessionUsage.inputTokens += result.usage.input_tokens ?? 0;
+          this.sessionUsage.outputTokens += result.usage.output_tokens ?? 0;
+          this.sessionUsage.cacheReadTokens += result.usage.cache_read_input_tokens ?? 0;
+          this.sessionUsage.cacheCreationTokens += result.usage.cache_creation_input_tokens ?? 0;
+        }
+
+        if (typeof result.total_cost_usd === 'number') {
+          this.sessionUsage.totalCostUsd += result.total_cost_usd;
+        }
+        this.sessionUsage.turnCount += 1;
+
+        // Emit updated rate limits
+        this.emitRateLimitsUpdate();
+      }
+
       return null;
     }
 

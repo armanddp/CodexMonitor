@@ -144,10 +144,7 @@ class ClaudeBridge {
 
     this.rpc.onRequest('account/rateLimits/read', async () => {
       this.ensureInitialized();
-      // Return placeholder rate limits
-      return {
-        limits: [],
-      };
+      return this.session.getRateLimits();
     });
 
     this.rpc.onRequest('skills/list', async () => {
