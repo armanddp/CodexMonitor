@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tokio::process::Command;
 use tokio::time::timeout;
 
@@ -12,12 +12,14 @@ use crate::backend::app_server::{
     build_codex_command_with_bin, build_codex_path_env, check_codex_installation,
     spawn_workspace_session as spawn_workspace_session_inner,
 };
+use crate::backend::claude_provider::{spawn_claude_session, ClaudeProvider};
 use crate::backend::codex_provider::CodexProvider;
 use crate::backend::provider::ProviderSession;
 use crate::event_sink::TauriEventSink;
 use crate::state::AppState;
-use crate::types::WorkspaceEntry;
+use crate::types::{ProviderType, WorkspaceEntry};
 
+/// Spawn a provider session based on the workspace's configured provider type
 pub(crate) async fn spawn_workspace_session(
     entry: WorkspaceEntry,
     default_codex_bin: Option<String>,
@@ -25,19 +27,33 @@ pub(crate) async fn spawn_workspace_session(
     codex_home: Option<PathBuf>,
 ) -> Result<ProviderSession, String> {
     let client_version = app_handle.package_info().version.to_string();
-    let event_sink = TauriEventSink::new(app_handle);
-    let session = spawn_workspace_session_inner(
-        entry,
-        default_codex_bin,
-        client_version,
-        event_sink,
-        codex_home,
-    )
-    .await?;
+    let event_sink = TauriEventSink::new(app_handle.clone());
 
-    // Wrap the session in a CodexProvider
-    let provider = CodexProvider::new(session);
-    Ok(Arc::new(provider))
+    match entry.settings.provider_type {
+        ProviderType::Codex => {
+            let session = spawn_workspace_session_inner(
+                entry,
+                default_codex_bin,
+                client_version,
+                event_sink,
+                codex_home,
+            )
+            .await?;
+            let provider = CodexProvider::new(session);
+            Ok(Arc::new(provider))
+        }
+        ProviderType::Claude => {
+            // Get app root for finding bundled bridge
+            let app_root: Option<PathBuf> = app_handle
+                .path()
+                .resource_dir()
+                .ok();
+
+            let session = spawn_claude_session(entry, client_version, event_sink, app_root).await?;
+            let provider = ClaudeProvider::new(session);
+            Ok(Arc::new(provider))
+        }
+    }
 }
 
 #[tauri::command]
