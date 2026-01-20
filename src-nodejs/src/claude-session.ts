@@ -112,6 +112,17 @@ type ThreadTokenUsage = {
   modelContextWindow: number | null;
 };
 
+type TurnContext = {
+  threadId: string;
+  turnId: string;
+  reasoningItemId: string | null;
+  reasoningBlockIndex: number | null;
+  toolOutputMethods: Map<string, ToolOutputMethod>;
+  abortController: AbortController;
+  activeQuery: { interrupt?: () => Promise<void> } | null;
+  model: string | null;
+};
+
 // Claude model context windows (in tokens)
 // All current Claude models support 200K context window
 // Sonnet 4.5 also has a 1M token context window in beta
@@ -286,6 +297,17 @@ function formatToolOutput(toolResponse: unknown): string {
       return response.output;
     }
 
+    // Diff payloads for write/edit tools
+    if ('diff' in response && typeof response.diff === 'string') {
+      return response.diff;
+    }
+    if ('patch' in response && typeof response.patch === 'string') {
+      return response.patch;
+    }
+    if ('unified_diff' in response && typeof response.unified_diff === 'string') {
+      return response.unified_diff;
+    }
+
     // Error responses
     if ('error' in response && typeof response.error === 'string') {
       return `Error: ${response.error}`;
@@ -317,11 +339,16 @@ function extractPreview(inputs: TurnInput[]): string {
   return '';
 }
 
-// All tools are silent in Claude - we only show thinking and agent messages
-// This matches the clean Codex chat experience
-function isSilentTool(_toolName: string, _toolInput?: Record<string, unknown>): boolean {
-  // All tools are silent - Claude chat only shows thinking and responses
-  return true;
+// Only surface file change tools to match the Codex UI experience.
+function isSilentTool(toolName: string, _toolInput?: Record<string, unknown>): boolean {
+  const normalized = toolName.toLowerCase();
+  const visibleTools = new Set([
+    'write',
+    'edit',
+    'notebookedit',
+    'str_replace_editor',
+  ]);
+  return !visibleTools.has(normalized);
 }
 
 function inferToolKind(toolName: string): ToolKind {
@@ -455,18 +482,12 @@ export class ClaudeSession {
   private rpc: JsonRpcHandler;
   private sessions: Map<string, SessionState> = new Map();
   private threads: Map<string, StoredThread> = new Map();
-  private toolOutputMethods: Map<string, ToolOutputMethod> = new Map();
-  private currentTurnId: string | null = null;
-  private currentThreadId: string | null = null;
-  private currentReasoningItemId: string | null = null;
-  private currentReasoningBlockIndex: number | null = null;
-  private abortController: AbortController | null = null;
   private approvalRequestId: number = 1;
-  private activeQuery: { interrupt?: () => Promise<void> } | null = null;
   private dataPath: string | null = null;
   private loadPromise: Promise<void> | null = null;
   private workspaceId: string;
   private claudeCodePath: string | null;
+  private turnContexts: Map<string, TurnContext> = new Map();
   private sessionUsage: SessionUsage = {
     inputTokens: 0,
     outputTokens: 0,
@@ -477,7 +498,6 @@ export class ClaudeSession {
     startedAt: Date.now(),
   };
   private threadTokenUsage: Map<string, ThreadTokenUsage> = new Map();
-  private currentModel: string | null = null;
 
   constructor(rpc: JsonRpcHandler, config: ClaudeSessionConfig) {
     this.rpc = rpc;
@@ -771,6 +791,8 @@ export class ClaudeSession {
    * Sends a JSON-RPC request to the client and waits for response
    */
   async requestToolApproval(
+    threadId: string,
+    turnId: string,
     toolName: string,
     args: Record<string, unknown>,
     details: {
@@ -784,8 +806,8 @@ export class ClaudeSession {
 
     try {
       const response = await this.rpc.request('codex/requestApproval/tool', {
-        threadId: this.currentThreadId,
-        turnId: this.currentTurnId,
+        threadId,
+        turnId,
         tool: toolName,
         args,
         blockedPath: details.blockedPath,
@@ -874,12 +896,17 @@ export class ClaudeSession {
     }
 
     const turnId = randomUUID();
-    this.currentTurnId = turnId;
-    this.currentThreadId = params.threadId;
-    this.currentReasoningItemId = null;
-    this.currentReasoningBlockIndex = null;
-    this.currentModel = params.model ?? null;
-    this.abortController = new AbortController();
+    const turnContext: TurnContext = {
+      threadId: params.threadId,
+      turnId,
+      reasoningItemId: null,
+      reasoningBlockIndex: null,
+      toolOutputMethods: new Map(),
+      abortController: new AbortController(),
+      activeQuery: null,
+      model: params.model ?? null,
+    };
+    this.turnContexts.set(turnId, turnContext);
 
     const thread = this.getThread(params.threadId, params.cwd);
     const turn = this.getTurn(thread, turnId);
@@ -906,7 +933,7 @@ export class ClaudeSession {
     const prompt = await this.buildPromptInput(params.input, session.sessionId ?? null);
 
     // Start processing in background
-    this.processWithClaude(session, thread, turn, turnId, prompt, params).catch((error) => {
+    this.processWithClaude(session, thread, turn, turnContext, prompt, params).catch((error) => {
       const payload = buildTurnErrorEvent(
         params.threadId,
         turnId,
@@ -919,27 +946,29 @@ export class ClaudeSession {
   }
 
   /**
-   * Interrupt the current turn
+   * Interrupt a running turn
    */
   async interruptTurn(threadId: string, turnId: string): Promise<void> {
-    if (this.currentTurnId === turnId && this.abortController) {
-      this.abortController.abort();
-      if (this.activeQuery?.interrupt) {
-        await this.activeQuery.interrupt().catch(() => {});
-      }
-      this.rpc.notify('turn/completed', {
-        threadId,
-        turnId,
-        interrupted: true,
-      });
+    const context = this.turnContexts.get(turnId);
+    if (!context || context.threadId !== threadId) {
+      return;
     }
+    context.abortController.abort();
+    if (context.activeQuery?.interrupt) {
+      await context.activeQuery.interrupt().catch(() => {});
+    }
+    this.rpc.notify('turn/completed', {
+      threadId: context.threadId,
+      turnId,
+      interrupted: true,
+    });
   }
 
   private async processWithClaude(
     session: SessionState,
     thread: StoredThread,
     turn: StoredTurn,
-    turnId: string,
+    context: TurnContext,
     prompt: string | AsyncIterable<SDKUserMessage>,
     params: TurnStartParams,
   ): Promise<void> {
@@ -949,6 +978,8 @@ export class ClaudeSession {
       const bypass = approvalPolicy === 'never';
       const sandboxPolicy = params.sandboxPolicy;
       const workspaceCwd = params.cwd || session.cwd;
+      const { turnId, threadId } = context;
+      const toolOutputMethods = context.toolOutputMethods;
 
       // Helper to check if a path is within allowed roots
       const isPathAllowed = (filePath: string): boolean => {
@@ -985,9 +1016,29 @@ export class ClaudeSession {
           return { allowed: true };
         }
 
-        // Tools that modify files
-        const writeTools = ['Write', 'Edit', 'NotebookEdit'];
-        const isWriteTool = writeTools.includes(toolName);
+        const normalizedTool = toolName.toLowerCase();
+        const writeTools = new Set([
+          'write',
+          'edit',
+          'notebookedit',
+          'str_replace_editor',
+        ]);
+        const isWriteTool = writeTools.has(normalizedTool);
+
+        const extractFilePath = (): string | undefined => {
+          const candidates = [
+            input.file_path,
+            input.notebook_path,
+            input.path,
+            input.filePath,
+          ];
+          for (const candidate of candidates) {
+            if (typeof candidate === 'string' && candidate.trim()) {
+              return candidate;
+            }
+          }
+          return undefined;
+        };
 
         if (sandboxPolicy.type === 'readOnly') {
           // In read-only mode, deny all write tools and Bash
@@ -997,7 +1048,7 @@ export class ClaudeSession {
               reason: `Tool "${toolName}" denied: sandbox policy is read-only`,
             };
           }
-          if (toolName === 'Bash') {
+          if (normalizedTool === 'bash') {
             return {
               allowed: false,
               reason: 'Bash commands denied: sandbox policy is read-only',
@@ -1008,7 +1059,7 @@ export class ClaudeSession {
         if (sandboxPolicy.type === 'workspaceWrite') {
           // Check file paths for write tools
           if (isWriteTool) {
-            const filePath = (input.file_path ?? input.notebook_path) as string | undefined;
+            const filePath = extractFilePath();
             if (filePath && !isPathAllowed(filePath)) {
               return {
                 allowed: false,
@@ -1046,7 +1097,7 @@ export class ClaudeSession {
         if (bypass) {
           return { behavior: 'allow', toolUseID: options.toolUseID };
         }
-        return this.requestToolApproval(toolName, input, {
+        return this.requestToolApproval(threadId, turnId, toolName, input, {
           toolUseId: options.toolUseID,
           blockedPath: options.blockedPath,
           decisionReason: options.decisionReason,
@@ -1063,10 +1114,10 @@ export class ClaudeSession {
               }
               const toolUseId = toolUseID ?? input.tool_use_id;
               const toolInput = input.tool_input as Record<string, unknown>;
-              if (!this.currentThreadId || !this.currentTurnId) {
+              if (!threadId || !turnId) {
                 return { continue: true };
               }
-              if (toolUseId && this.toolOutputMethods.has(toolUseId)) {
+              if (toolUseId && toolOutputMethods.has(toolUseId)) {
                 return { continue: true };
               }
               // Skip emitting events for silent tools (read-only/query tools)
@@ -1082,12 +1133,12 @@ export class ClaudeSession {
                 toolCwd,
                 itemId,
               );
-              this.toolOutputMethods.set(itemId, outputMethod);
+              toolOutputMethods.set(itemId, outputMethod);
               turn.items.push(item);
               this.touchThread(thread);
               const payload = buildToolStartEvent(
-                this.currentThreadId,
-                this.currentTurnId,
+                threadId,
+                turnId,
                 item,
               );
               this.rpc.notify(payload.method, payload.params);
@@ -1101,7 +1152,7 @@ export class ClaudeSession {
               if (input.hook_event_name !== 'PostToolUse') {
                 return { continue: true };
               }
-              if (!this.currentThreadId || !this.currentTurnId) {
+              if (!threadId || !turnId) {
                 return { continue: true };
               }
               // Skip emitting events for silent tools (read-only/query tools)
@@ -1113,22 +1164,22 @@ export class ClaudeSession {
                 return { continue: true };
               }
               const outputMethod =
-                this.toolOutputMethods.get(toolUseId) ??
+                toolOutputMethods.get(toolUseId) ??
                 'item/commandExecution/outputDelta';
               const delta = formatToolOutput(input.tool_response);
               if (delta) {
                 this.upsertToolOutput(turn, toolUseId, delta, outputMethod);
                 this.touchThread(thread);
                 const payload = buildToolOutputEvent(
-                  this.currentThreadId,
-                  this.currentTurnId,
+                  threadId,
+                  turnId,
                   toolUseId,
                   delta,
                   outputMethod,
                 );
                 this.rpc.notify(payload.method, payload.params);
               }
-              this.finalizeToolItem(thread, turn, turnId, toolUseId, 'completed');
+              this.finalizeToolItem(thread, turn, turnId, toolUseId, 'completed', toolOutputMethods);
               await this.persistThreads();
               return { continue: true };
             }],
@@ -1140,7 +1191,7 @@ export class ClaudeSession {
               if (input.hook_event_name !== 'PostToolUseFailure') {
                 return { continue: true };
               }
-              if (!this.currentThreadId || !this.currentTurnId) {
+              if (!threadId || !turnId) {
                 return { continue: true };
               }
               // Skip emitting events for silent tools (read-only/query tools)
@@ -1152,22 +1203,22 @@ export class ClaudeSession {
                 return { continue: true };
               }
               const outputMethod =
-                this.toolOutputMethods.get(toolUseId) ??
+                toolOutputMethods.get(toolUseId) ??
                 'item/commandExecution/outputDelta';
               const delta = formatToolOutput(input.error);
               if (delta) {
                 this.upsertToolOutput(turn, toolUseId, delta, outputMethod);
                 this.touchThread(thread);
                 const payload = buildToolOutputEvent(
-                  this.currentThreadId,
-                  this.currentTurnId,
+                  threadId,
+                  turnId,
                   toolUseId,
                   delta,
                   outputMethod,
                 );
                 this.rpc.notify(payload.method, payload.params);
               }
-              this.finalizeToolItem(thread, turn, turnId, toolUseId, 'failed');
+              this.finalizeToolItem(thread, turn, turnId, toolUseId, 'failed', toolOutputMethods);
               await this.persistThreads();
               return { continue: true };
             }],
@@ -1198,7 +1249,7 @@ export class ClaudeSession {
         hooks,
         includePartialMessages: true,
         persistSession: true,
-        abortController: this.abortController ?? undefined,
+        abortController: context.abortController,
         stderr: (data: string) => {
           this.rpc.notify('codex/stderr', { message: data.trim() });
         },
@@ -1220,10 +1271,10 @@ export class ClaudeSession {
       let fullContent = '';
 
       const queryInstance = query({ prompt, options });
-      this.activeQuery = queryInstance;
+      context.activeQuery = queryInstance;
 
       for await (const message of queryInstance) {
-        if (this.abortController?.signal.aborted) {
+        if (context.abortController.signal.aborted) {
           break;
         }
         const updated = await this.handleSdkMessage(
@@ -1232,6 +1283,7 @@ export class ClaudeSession {
           turnId,
           itemId,
           message,
+          context,
         );
         if (updated) {
           fullContent = updated;
@@ -1256,7 +1308,7 @@ export class ClaudeSession {
       });
 
       // Complete the turn
-      if (!this.abortController?.signal.aborted) {
+      if (!context.abortController.signal.aborted) {
         this.rpc.notify('turn/completed', {
           threadId: thread.id,
           turnId,
@@ -1274,13 +1326,8 @@ export class ClaudeSession {
       this.rpc.notify(payload.method, payload.params);
       await this.persistThreads();
     } finally {
-      this.currentTurnId = null;
-      this.currentThreadId = null;
-      this.currentReasoningItemId = null;
-      this.currentReasoningBlockIndex = null;
-      this.currentModel = null;
-      this.abortController = null;
-      this.activeQuery = null;
+      this.turnContexts.delete(turnId);
+      context.activeQuery = null;
     }
   }
 
@@ -1290,6 +1337,7 @@ export class ClaudeSession {
     turnId: string,
     itemId: string,
     message: SDKMessage,
+    context: TurnContext,
   ): Promise<string | null> {
     if (isStreamEvent(message)) {
       const event = message.event;
@@ -1306,10 +1354,10 @@ export class ClaudeSession {
         if (event.delta.type === 'thinking_delta') {
           const delta = event.delta.thinking ?? '';
           if (delta) {
-            if (!this.currentReasoningItemId) {
+            if (!context.reasoningItemId) {
               // Fallback: create reasoning item if we missed content_block_start
               const reasoningId = randomUUID();
-              this.currentReasoningItemId = reasoningId;
+              context.reasoningItemId = reasoningId;
               const reasoningItem: StoredItem = {
                 id: reasoningId,
                 type: 'reasoning',
@@ -1324,7 +1372,10 @@ export class ClaudeSession {
                 item: reasoningItem,
               });
             }
-            const reasoningId = this.currentReasoningItemId;
+            const reasoningId = context.reasoningItemId;
+            if (!reasoningId) {
+              return null;
+            }
             // Emit both summaryTextDelta (for UI preview) and textDelta (for full content)
             this.rpc.notify('item/reasoning/summaryTextDelta', {
               threadId: thread.id,
@@ -1346,11 +1397,11 @@ export class ClaudeSession {
       if (event.type === 'content_block_start') {
         const block = event.content_block as { type: string; id?: string; name?: string; input?: unknown };
         const blockIndex = (event as { index?: number }).index;
-        if (block.type === 'thinking' && this.currentThreadId && this.currentTurnId) {
+        if (block.type === 'thinking') {
           // Start a new reasoning block
           const reasoningId = randomUUID();
-          this.currentReasoningItemId = reasoningId;
-          this.currentReasoningBlockIndex = blockIndex ?? null;
+          context.reasoningItemId = reasoningId;
+          context.reasoningBlockIndex = blockIndex ?? null;
           const reasoningItem: StoredItem = {
             id: reasoningId,
             type: 'reasoning',
@@ -1365,7 +1416,7 @@ export class ClaudeSession {
             item: reasoningItem,
           });
         }
-        if (block.type === 'tool_use' && this.currentThreadId && this.currentTurnId) {
+        if (block.type === 'tool_use') {
           const toolName = block.name ?? 'Tool';
           const toolInput = (block.input as Record<string, unknown>) ?? {};
           // Skip emitting events for silent tools (read-only/query tools)
@@ -1373,19 +1424,19 @@ export class ClaudeSession {
             return null;
           }
           const toolUseId = block.id ?? randomUUID();
-          if (!this.toolOutputMethods.has(toolUseId)) {
+          if (!context.toolOutputMethods.has(toolUseId)) {
             const { item, outputMethod } = buildToolItem(
               toolName,
               toolInput,
               thread.cwd,
               toolUseId,
             );
-            this.toolOutputMethods.set(toolUseId, outputMethod);
+            context.toolOutputMethods.set(toolUseId, outputMethod);
             turn.items.push(item);
             this.touchThread(thread);
             const payload = buildToolStartEvent(
-              this.currentThreadId,
-              this.currentTurnId,
+              thread.id,
+              turnId,
               item,
             );
             this.rpc.notify(payload.method, payload.params);
@@ -1396,15 +1447,13 @@ export class ClaudeSession {
         const blockIndex = (event as { index?: number }).index;
         // Check if this is the end of a thinking block
         if (
-          this.currentReasoningItemId &&
-          this.currentReasoningBlockIndex !== null &&
-          blockIndex === this.currentReasoningBlockIndex &&
-          this.currentThreadId &&
-          this.currentTurnId
+          context.reasoningItemId &&
+          context.reasoningBlockIndex !== null &&
+          blockIndex === context.reasoningBlockIndex
         ) {
           // Find the reasoning item and emit completed
           const reasoningItem = turn.items.find(
-            (entry) => entry.id === this.currentReasoningItemId && entry.type === 'reasoning',
+            (entry) => entry.id === context.reasoningItemId && entry.type === 'reasoning',
           );
           if (reasoningItem) {
             this.rpc.notify('item/completed', {
@@ -1413,7 +1462,7 @@ export class ClaudeSession {
               item: reasoningItem,
             });
           }
-          this.currentReasoningBlockIndex = null;
+          context.reasoningBlockIndex = null;
         }
       }
       return null;
@@ -1428,8 +1477,8 @@ export class ClaudeSession {
       }
       const reasoning = extractAssistantThinking(message.message);
       if (reasoning) {
-        const reasoningId = this.currentReasoningItemId ?? randomUUID();
-        this.currentReasoningItemId = reasoningId;
+        const reasoningId = context.reasoningItemId ?? randomUUID();
+        context.reasoningItemId = reasoningId;
         this.upsertReasoningMessage(thread, turn, reasoningId, reasoning, true);
         this.touchThread(thread);
       }
@@ -1526,7 +1575,7 @@ export class ClaudeSession {
         const threadUsage: ThreadTokenUsage = {
           total: totalUsage,
           last: lastUsage,
-          modelContextWindow: getModelContextWindow(this.currentModel ?? undefined),
+          modelContextWindow: getModelContextWindow(context.model ?? undefined),
         };
 
         this.threadTokenUsage.set(thread.id, threadUsage);
@@ -1553,6 +1602,7 @@ export class ClaudeSession {
     turnId: string,
     itemId: string,
     status: string,
+    toolOutputMethods: Map<string, ToolOutputMethod>,
   ): void {
     const item = turn.items.find(
       (entry) =>
@@ -1565,7 +1615,7 @@ export class ClaudeSession {
       return;
     }
     item.status = status;
-    this.toolOutputMethods.delete(itemId);
+    toolOutputMethods.delete(itemId);
     this.touchThread(thread);
     this.rpc.notify('item/completed', {
       threadId: thread.id,

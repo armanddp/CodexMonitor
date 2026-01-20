@@ -170,7 +170,7 @@ class ClaudeBridge {
 
     this.rpc.onRequest('account/rateLimits/read', async () => {
       this.ensureInitialized();
-      return this.session.getRateLimits();
+      return { rateLimits: this.session.getRateLimits() };
     });
 
     this.rpc.onRequest('skills/list', async () => {

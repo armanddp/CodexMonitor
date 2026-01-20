@@ -109,8 +109,11 @@ fn find_claude_bridge(app_root: Option<&Path>) -> PathBuf {
         }
     }
 
-    // Development location - relative to project root
-    // This assumes we're running from the project directory
+    // Development location - resolve against the current working directory
+    if let Ok(current_dir) = std::env::current_dir() {
+        return current_dir.join("src-nodejs/dist/index.js");
+    }
+
     PathBuf::from("src-nodejs/dist/index.js")
 }
 
@@ -322,7 +325,10 @@ mod tests {
     #[test]
     fn find_claude_bridge_returns_dev_path_without_app_root() {
         let path = find_claude_bridge(None);
-        assert_eq!(path, PathBuf::from("src-nodejs/dist/index.js"));
+        let expected = std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join("src-nodejs/dist/index.js");
+        assert_eq!(path, expected);
     }
 
     #[test]
