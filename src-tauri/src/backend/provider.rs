@@ -17,9 +17,6 @@ pub trait AgentProvider: Send + Sync {
     /// Send a JSON-RPC request and wait for a response
     async fn send_request(&self, method: &str, params: Value) -> Result<Value, String>;
 
-    /// Send a JSON-RPC notification (no response expected)
-    async fn send_notification(&self, method: &str, params: Option<Value>) -> Result<(), String>;
-
     /// Send a JSON-RPC response to a server-initiated request
     async fn send_response(&self, id: u64, result: Value) -> Result<(), String>;
 

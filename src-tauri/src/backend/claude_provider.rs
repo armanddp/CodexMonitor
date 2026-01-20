@@ -85,10 +85,6 @@ impl AgentProvider for ClaudeProvider {
         self.session.send_request(method, params).await
     }
 
-    async fn send_notification(&self, method: &str, params: Option<Value>) -> Result<(), String> {
-        self.session.send_notification(method, params).await
-    }
-
     async fn send_response(&self, id: u64, result: Value) -> Result<(), String> {
         self.session.send_response(id, result).await
     }
@@ -151,25 +147,6 @@ pub async fn check_node_installation(path_env: Option<&str>) -> Result<Option<St
     } else {
         Some(version)
     })
-}
-
-/// Build a JSON-RPC request message
-fn build_request_message(id: u64, method: &str, params: Value) -> Value {
-    json!({ "id": id, "method": method, "params": params })
-}
-
-/// Build a JSON-RPC notification message
-fn build_notification_message(method: &str, params: Option<Value>) -> Value {
-    if let Some(params) = params {
-        json!({ "method": method, "params": params })
-    } else {
-        json!({ "method": method })
-    }
-}
-
-/// Build a JSON-RPC response message
-fn build_response_message(id: u64, result: Value) -> Value {
-    json!({ "id": id, "result": result })
 }
 
 /// Spawn a Claude bridge session for a workspace

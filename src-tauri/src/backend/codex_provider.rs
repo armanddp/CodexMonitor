@@ -19,11 +19,6 @@ impl CodexProvider {
     pub fn new(session: Arc<WorkspaceSession>) -> Self {
         Self { session }
     }
-
-    /// Get the underlying WorkspaceSession for direct access when needed
-    pub fn session(&self) -> &Arc<WorkspaceSession> {
-        &self.session
-    }
 }
 
 #[async_trait]
@@ -34,10 +29,6 @@ impl AgentProvider for CodexProvider {
 
     async fn send_request(&self, method: &str, params: Value) -> Result<Value, String> {
         self.session.send_request(method, params).await
-    }
-
-    async fn send_notification(&self, method: &str, params: Option<Value>) -> Result<(), String> {
-        self.session.send_notification(method, params).await
     }
 
     async fn send_response(&self, id: u64, result: Value) -> Result<(), String> {
