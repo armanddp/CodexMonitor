@@ -903,6 +903,12 @@ pub(crate) async fn connect_workspace(
         (settings.codex_bin.clone(), settings.claude_bin.clone())
     };
     let codex_home = resolve_workspace_codex_home(&entry, parent_path.as_deref());
+
+    // Shutdown existing session before spawning a new one (e.g., when changing provider type)
+    if let Some(old_session) = state.sessions.lock().await.remove(&id) {
+        let _ = old_session.shutdown().await;
+    }
+
     let session =
         spawn_workspace_session(entry.clone(), default_bin, claude_bin, app, codex_home).await?;
     state.sessions.lock().await.insert(entry.id, session);

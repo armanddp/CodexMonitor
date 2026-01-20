@@ -947,6 +947,82 @@ export class ClaudeSession {
       const { query } = await import('@anthropic-ai/claude-agent-sdk');
       const approvalPolicy = params.approvalPolicy ?? 'on-request';
       const bypass = approvalPolicy === 'never';
+      const sandboxPolicy = params.sandboxPolicy;
+      const workspaceCwd = params.cwd || session.cwd;
+
+      // Helper to check if a path is within allowed roots
+      const isPathAllowed = (filePath: string): boolean => {
+        if (!sandboxPolicy || sandboxPolicy.type === 'dangerFullAccess') {
+          return true;
+        }
+        const absolutePath = path.isAbsolute(filePath)
+          ? path.normalize(filePath)
+          : path.normalize(path.join(workspaceCwd, filePath));
+        // Check workspace cwd
+        if (absolutePath.startsWith(path.normalize(workspaceCwd) + path.sep) ||
+            absolutePath === path.normalize(workspaceCwd)) {
+          return true;
+        }
+        // Check additional writable roots
+        if (sandboxPolicy.writableRoots) {
+          for (const root of sandboxPolicy.writableRoots) {
+            const normalizedRoot = path.normalize(root);
+            if (absolutePath.startsWith(normalizedRoot + path.sep) ||
+                absolutePath === normalizedRoot) {
+              return true;
+            }
+          }
+        }
+        return false;
+      };
+
+      // Helper to check sandbox policy violations
+      const checkSandboxPolicy = (
+        toolName: string,
+        input: Record<string, unknown>,
+      ): { allowed: boolean; reason?: string } => {
+        if (!sandboxPolicy || sandboxPolicy.type === 'dangerFullAccess') {
+          return { allowed: true };
+        }
+
+        // Tools that modify files
+        const writeTools = ['Write', 'Edit', 'NotebookEdit'];
+        const isWriteTool = writeTools.includes(toolName);
+
+        if (sandboxPolicy.type === 'readOnly') {
+          // In read-only mode, deny all write tools and Bash
+          if (isWriteTool) {
+            return {
+              allowed: false,
+              reason: `Tool "${toolName}" denied: sandbox policy is read-only`,
+            };
+          }
+          if (toolName === 'Bash') {
+            return {
+              allowed: false,
+              reason: 'Bash commands denied: sandbox policy is read-only',
+            };
+          }
+        }
+
+        if (sandboxPolicy.type === 'workspaceWrite') {
+          // Check file paths for write tools
+          if (isWriteTool) {
+            const filePath = (input.file_path ?? input.notebook_path) as string | undefined;
+            if (filePath && !isPathAllowed(filePath)) {
+              return {
+                allowed: false,
+                reason: `Tool "${toolName}" denied: path "${filePath}" is outside allowed workspace roots`,
+              };
+            }
+          }
+          // For Bash, we allow it but note it may write outside workspace
+          // The approval flow will still apply if not bypassed
+        }
+
+        return { allowed: true };
+      };
+
       const canUseTool = async (
         toolName: string,
         input: Record<string, unknown>,
@@ -957,6 +1033,16 @@ export class ClaudeSession {
           toolUseID: string;
         },
       ): Promise<PermissionResult> => {
+        // Check sandbox policy first
+        const sandboxCheck = checkSandboxPolicy(toolName, input);
+        if (!sandboxCheck.allowed) {
+          return {
+            behavior: 'deny',
+            toolUseID: options.toolUseID,
+            message: sandboxCheck.reason ?? 'Operation denied by sandbox policy',
+          };
+        }
+
         if (bypass) {
           return { behavior: 'allow', toolUseID: options.toolUseID };
         }
