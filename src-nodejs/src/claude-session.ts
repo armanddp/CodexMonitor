@@ -249,6 +249,53 @@ function formatToolOutput(toolResponse: unknown): string {
   if (typeof toolResponse === 'number' || typeof toolResponse === 'boolean') {
     return String(toolResponse);
   }
+  // Handle structured tool responses (e.g., Bash tool with stdout/stderr)
+  if (typeof toolResponse === 'object' && toolResponse !== null) {
+    const response = toolResponse as Record<string, unknown>;
+
+    // Extract meaningful content from common response formats
+    // Bash tool format: { stdout, stderr, interrupted, isImage }
+    if ('stdout' in response || 'stderr' in response) {
+      const stdout = typeof response.stdout === 'string' ? response.stdout : '';
+      const stderr = typeof response.stderr === 'string' ? response.stderr : '';
+      if (stderr && stdout) {
+        return `${stdout}\n\nstderr:\n${stderr}`;
+      }
+      return stderr || stdout;
+    }
+
+    // Read tool format: { content, ... } or just text content
+    if ('content' in response && typeof response.content === 'string') {
+      return response.content;
+    }
+
+    // Text field common in many responses
+    if ('text' in response && typeof response.text === 'string') {
+      return response.text;
+    }
+
+    // Result field
+    if ('result' in response && typeof response.result === 'string') {
+      return response.result;
+    }
+
+    // Output field
+    if ('output' in response && typeof response.output === 'string') {
+      return response.output;
+    }
+
+    // Error responses
+    if ('error' in response && typeof response.error === 'string') {
+      return `Error: ${response.error}`;
+    }
+
+    // Message field
+    if ('message' in response && typeof response.message === 'string') {
+      return response.message;
+    }
+  }
+
+  // Fallback to JSON for truly complex objects
   try {
     return JSON.stringify(toolResponse, null, 2);
   } catch {
@@ -268,15 +315,38 @@ function extractPreview(inputs: TurnInput[]): string {
   return '';
 }
 
+// Tools that SHOULD emit UI events (user-visible actions)
+// Only bash commands and file modifications are shown
+const VISIBLE_TOOLS = new Set([
+  'bash',
+  'write',
+  'edit',
+  'notebookedit',
+  'str_replace_editor', // Alternative name for edit
+]);
+
+function isSilentTool(toolName: string): boolean {
+  const normalized = toolName.toLowerCase();
+  // MCP tools (prefixed with mcp__) are generally silent unless they modify files
+  if (normalized.startsWith('mcp__')) {
+    return true;
+  }
+  // Only show tools in the VISIBLE_TOOLS set
+  return !VISIBLE_TOOLS.has(normalized);
+}
+
 function inferToolKind(toolName: string): ToolKind {
   const normalized = toolName.toLowerCase();
+  // File modification tools
   if (
-    normalized.includes('write') ||
-    normalized.includes('edit') ||
-    normalized.includes('str_replace')
+    normalized === 'write' ||
+    normalized === 'edit' ||
+    normalized === 'notebookedit' ||
+    normalized === 'str_replace_editor'
   ) {
     return 'fileChange';
   }
+  // Everything else (bash) is a command execution
   return 'commandExecution';
 }
 
@@ -293,21 +363,17 @@ function inferFileChangeKind(toolName: string): FileChange['kind'] {
 
 function formatCommand(toolName: string, toolInput: Record<string, unknown>): string {
   const normalized = toolName.toLowerCase();
-  const command = toolInput.command;
-  if (normalized === 'bash' && typeof command === 'string') {
-    return command;
-  }
-  if (normalized === 'grep' && typeof toolInput.pattern === 'string') {
-    return `grep ${toolInput.pattern}`;
-  }
-  if (normalized === 'glob' && typeof toolInput.pattern === 'string') {
-    return `glob ${toolInput.pattern}`;
-  }
-  if (normalized === 'websearch' && typeof toolInput.query === 'string') {
-    return `websearch ${toolInput.query}`;
-  }
-  if (normalized === 'webfetch' && typeof toolInput.url === 'string') {
-    return `webfetch ${toolInput.url}`;
+  // For bash, show the actual command
+  if (normalized === 'bash') {
+    const command = toolInput.command;
+    if (typeof command === 'string') {
+      return command;
+    }
+    // Check for description field (Claude SDK sometimes includes this)
+    const description = toolInput.description;
+    if (typeof description === 'string') {
+      return description;
+    }
   }
   return toolName;
 }
@@ -928,6 +994,10 @@ export class ClaudeSession {
               if (toolUseId && this.toolOutputMethods.has(toolUseId)) {
                 return { continue: true };
               }
+              // Skip emitting events for silent tools (read-only/query tools)
+              if (isSilentTool(input.tool_name)) {
+                return { continue: true };
+              }
               const itemId = toolUseId ?? randomUUID();
               const toolCwd =
                 typeof input.cwd === 'string' && input.cwd ? input.cwd : thread.cwd;
@@ -957,6 +1027,10 @@ export class ClaudeSession {
                 return { continue: true };
               }
               if (!this.currentThreadId || !this.currentTurnId) {
+                return { continue: true };
+              }
+              // Skip emitting events for silent tools (read-only/query tools)
+              if (isSilentTool(input.tool_name)) {
                 return { continue: true };
               }
               const toolUseId = toolUseID ?? input.tool_use_id;
@@ -992,6 +1066,10 @@ export class ClaudeSession {
                 return { continue: true };
               }
               if (!this.currentThreadId || !this.currentTurnId) {
+                return { continue: true };
+              }
+              // Skip emitting events for silent tools (read-only/query tools)
+              if (isSilentTool(input.tool_name)) {
                 return { continue: true };
               }
               const toolUseId = toolUseID ?? input.tool_use_id;
@@ -1213,11 +1291,16 @@ export class ClaudeSession {
           });
         }
         if (block.type === 'tool_use' && this.currentThreadId && this.currentTurnId) {
+          const toolName = block.name ?? 'Tool';
+          // Skip emitting events for silent tools (read-only/query tools)
+          if (isSilentTool(toolName)) {
+            return null;
+          }
           const toolUseId = block.id ?? randomUUID();
           if (!this.toolOutputMethods.has(toolUseId)) {
             const toolInput = (block.input as Record<string, unknown>) ?? {};
             const { item, outputMethod } = buildToolItem(
-              block.name ?? 'Tool',
+              toolName,
               toolInput,
               thread.cwd,
               toolUseId,
