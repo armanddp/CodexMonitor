@@ -29,17 +29,6 @@ import type {
 // Update this list when new models are released.
 const CLAUDE_MODELS = [
   {
-    id: 'claude-sonnet-4-20250514',
-    model: 'claude-sonnet-4-20250514',
-    displayName: 'Claude Sonnet 4',
-    description: 'Fast, intelligent model for everyday tasks',
-    supportedReasoningEfforts: [
-      { reasoningEffort: 'default', description: 'Standard response mode' },
-    ],
-    defaultReasoningEffort: 'default',
-    isDefault: true,
-  },
-  {
     id: 'claude-opus-4-5-20251101',
     model: 'claude-opus-4-5-20251101',
     displayName: 'Claude Opus 4.5',
@@ -49,7 +38,32 @@ const CLAUDE_MODELS = [
       { reasoningEffort: 'medium', description: 'Balanced thinking for most tasks' },
       { reasoningEffort: 'high', description: 'Deep thinking for complex problems' },
     ],
-    defaultReasoningEffort: 'medium',
+    defaultReasoningEffort: 'high',
+    isDefault: true,
+  },
+  {
+    id: 'claude-sonnet-4-5-20250929',
+    model: 'claude-sonnet-4-5-20250929',
+    displayName: 'Claude Sonnet 4.5',
+    description: 'Best model for complex agents and coding',
+    supportedReasoningEfforts: [
+      { reasoningEffort: 'default', description: 'Standard response mode' },
+      { reasoningEffort: 'low', description: 'Quick responses with minimal thinking' },
+      { reasoningEffort: 'medium', description: 'Balanced thinking for most tasks' },
+      { reasoningEffort: 'high', description: 'Deep thinking for complex problems' },
+    ],
+    defaultReasoningEffort: 'default',
+    isDefault: false,
+  },
+  {
+    id: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-20250514',
+    displayName: 'Claude Sonnet 4',
+    description: 'Fast, intelligent model for everyday tasks',
+    supportedReasoningEfforts: [
+      { reasoningEffort: 'default', description: 'Standard response mode' },
+    ],
+    defaultReasoningEffort: 'default',
     isDefault: false,
   },
 ];

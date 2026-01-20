@@ -114,8 +114,10 @@ type ThreadTokenUsage = {
 
 // Claude model context windows (in tokens)
 // All current Claude models support 200K context window
+// Sonnet 4.5 also has a 1M token context window in beta
 const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   'claude-opus-4-5-20251101': 200000,
+  'claude-sonnet-4-5-20250929': 200000,
   'claude-sonnet-4-20250514': 200000,
   'claude-3-7-sonnet-20250219': 200000,
   'claude-3-5-sonnet-20241022': 200000,
@@ -315,24 +317,11 @@ function extractPreview(inputs: TurnInput[]): string {
   return '';
 }
 
-// Tools that SHOULD emit UI events (user-visible actions)
-// Only bash commands and file modifications are shown
-const VISIBLE_TOOLS = new Set([
-  'bash',
-  'write',
-  'edit',
-  'notebookedit',
-  'str_replace_editor', // Alternative name for edit
-]);
-
-function isSilentTool(toolName: string): boolean {
-  const normalized = toolName.toLowerCase();
-  // MCP tools (prefixed with mcp__) are generally silent unless they modify files
-  if (normalized.startsWith('mcp__')) {
-    return true;
-  }
-  // Only show tools in the VISIBLE_TOOLS set
-  return !VISIBLE_TOOLS.has(normalized);
+// All tools are silent in Claude - we only show thinking and agent messages
+// This matches the clean Codex chat experience
+function isSilentTool(_toolName: string, _toolInput?: Record<string, unknown>): boolean {
+  // All tools are silent - Claude chat only shows thinking and responses
+  return true;
 }
 
 function inferToolKind(toolName: string): ToolKind {
@@ -995,7 +984,7 @@ export class ClaudeSession {
                 return { continue: true };
               }
               // Skip emitting events for silent tools (read-only/query tools)
-              if (isSilentTool(input.tool_name)) {
+              if (isSilentTool(input.tool_name, toolInput)) {
                 return { continue: true };
               }
               const itemId = toolUseId ?? randomUUID();
@@ -1030,7 +1019,7 @@ export class ClaudeSession {
                 return { continue: true };
               }
               // Skip emitting events for silent tools (read-only/query tools)
-              if (isSilentTool(input.tool_name)) {
+              if (isSilentTool(input.tool_name, input.tool_input as Record<string, unknown>)) {
                 return { continue: true };
               }
               const toolUseId = toolUseID ?? input.tool_use_id;
@@ -1069,7 +1058,7 @@ export class ClaudeSession {
                 return { continue: true };
               }
               // Skip emitting events for silent tools (read-only/query tools)
-              if (isSilentTool(input.tool_name)) {
+              if (isSilentTool(input.tool_name, input.tool_input as Record<string, unknown>)) {
                 return { continue: true };
               }
               const toolUseId = toolUseID ?? input.tool_use_id;
@@ -1292,13 +1281,13 @@ export class ClaudeSession {
         }
         if (block.type === 'tool_use' && this.currentThreadId && this.currentTurnId) {
           const toolName = block.name ?? 'Tool';
+          const toolInput = (block.input as Record<string, unknown>) ?? {};
           // Skip emitting events for silent tools (read-only/query tools)
-          if (isSilentTool(toolName)) {
+          if (isSilentTool(toolName, toolInput)) {
             return null;
           }
           const toolUseId = block.id ?? randomUUID();
           if (!this.toolOutputMethods.has(toolUseId)) {
-            const toolInput = (block.input as Record<string, unknown>) ?? {};
             const { item, outputMethod } = buildToolItem(
               toolName,
               toolInput,
