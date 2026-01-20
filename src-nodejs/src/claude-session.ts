@@ -13,6 +13,14 @@ import type {
 import type { JsonRpcHandler } from './rpc.js';
 import type { SessionState, TurnStartParams, TurnInput } from './types.js';
 
+// Map reasoning effort to maxThinkingTokens for the Claude SDK
+const EFFORT_TO_THINKING_TOKENS: Record<string, number | undefined> = {
+  default: undefined, // Let SDK decide
+  low: 4096,
+  medium: 16384,
+  high: 65536,
+};
+
 type StoredThread = {
   id: string;
   cwd: string;
@@ -962,6 +970,10 @@ export class ClaudeSession {
         ],
       };
 
+      // Determine maxThinkingTokens from effort parameter
+      const effort = params.effort ?? 'default';
+      const maxThinkingTokens = EFFORT_TO_THINKING_TOKENS[effort];
+
       const options = {
         cwd: params.cwd || session.cwd,
         model: params.model,
@@ -986,6 +998,7 @@ export class ClaudeSession {
           this.rpc.notify('codex/stderr', { message: data.trim() });
         },
         pathToClaudeCodeExecutable: this.claudeCodePath ?? undefined,
+        maxThinkingTokens,
       } satisfies Parameters<typeof query>[0]['options'];
 
       // Start an agent message item

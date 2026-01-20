@@ -24,7 +24,7 @@ import type {
   TurnInterruptParams,
 } from './types.js';
 
-// Available Claude models
+// Available Claude models with reasoning effort support
 // Note: The Agent SDK doesn't expose a model listing API, so these are hardcoded.
 // Update this list when new models are released.
 const CLAUDE_MODELS = [
@@ -32,12 +32,24 @@ const CLAUDE_MODELS = [
     id: 'claude-sonnet-4-20250514',
     model: 'claude-sonnet-4-20250514',
     displayName: 'Claude Sonnet 4',
+    description: 'Fast, intelligent model for everyday tasks',
+    supportedReasoningEfforts: [
+      { reasoningEffort: 'default', description: 'Standard response mode' },
+    ],
+    defaultReasoningEffort: 'default',
     isDefault: true,
   },
   {
     id: 'claude-opus-4-5-20251101',
     model: 'claude-opus-4-5-20251101',
     displayName: 'Claude Opus 4.5',
+    description: 'Most capable model with extended thinking',
+    supportedReasoningEfforts: [
+      { reasoningEffort: 'low', description: 'Quick responses with minimal thinking' },
+      { reasoningEffort: 'medium', description: 'Balanced thinking for most tasks' },
+      { reasoningEffort: 'high', description: 'Deep thinking for complex problems' },
+    ],
+    defaultReasoningEffort: 'medium',
     isDefault: false,
   },
 ];
