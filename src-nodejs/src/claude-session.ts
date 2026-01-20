@@ -98,6 +98,50 @@ type SessionUsage = {
   startedAt: number;
 };
 
+type TokenUsageBreakdown = {
+  totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+};
+
+type ThreadTokenUsage = {
+  total: TokenUsageBreakdown;
+  last: TokenUsageBreakdown;
+  modelContextWindow: number | null;
+};
+
+// Claude model context windows (in tokens)
+// All current Claude models support 200K context window
+const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  'claude-opus-4-5-20251101': 200000,
+  'claude-sonnet-4-20250514': 200000,
+  'claude-3-7-sonnet-20250219': 200000,
+  'claude-3-5-sonnet-20241022': 200000,
+  'claude-3-5-sonnet-20240620': 200000,
+  'claude-3-5-haiku-20241022': 200000,
+  'claude-3-opus-20240229': 200000,
+  'claude-3-sonnet-20240229': 200000,
+  'claude-3-haiku-20240307': 200000,
+};
+
+function getModelContextWindow(model: string | undefined): number | null {
+  if (!model) return 200000; // Default to 200K
+  // Try exact match
+  if (MODEL_CONTEXT_WINDOWS[model]) {
+    return MODEL_CONTEXT_WINDOWS[model];
+  }
+  // Try prefix match (e.g., "claude-opus-4-5" matches "claude-opus-4-5-20251101")
+  for (const [key, value] of Object.entries(MODEL_CONTEXT_WINDOWS)) {
+    if (model.startsWith(key.split('-').slice(0, -1).join('-'))) {
+      return value;
+    }
+  }
+  // Default to 200K for unknown Claude models
+  return 200000;
+}
+
 type ToolStartEvent = {
   method: 'item/started';
   params: {
@@ -377,6 +421,8 @@ export class ClaudeSession {
     turnCount: 0,
     startedAt: Date.now(),
   };
+  private threadTokenUsage: Map<string, ThreadTokenUsage> = new Map();
+  private currentModel: string | null = null;
 
   constructor(rpc: JsonRpcHandler, config: ClaudeSessionConfig) {
     this.rpc = rpc;
@@ -777,6 +823,7 @@ export class ClaudeSession {
     this.currentThreadId = params.threadId;
     this.currentReasoningItemId = null;
     this.currentReasoningBlockIndex = null;
+    this.currentModel = params.model ?? null;
     this.abortController = new AbortController();
 
     const thread = this.getThread(params.threadId, params.cwd);
@@ -1078,6 +1125,7 @@ export class ClaudeSession {
       this.currentThreadId = null;
       this.currentReasoningItemId = null;
       this.currentReasoningBlockIndex = null;
+      this.currentModel = null;
       this.abortController = null;
       this.activeQuery = null;
     }
@@ -1264,18 +1312,29 @@ export class ClaudeSession {
           total_cost_usd?: number;
         };
 
+        // Calculate turn usage for this turn
+        let turnInputTokens = 0;
+        let turnOutputTokens = 0;
+        let turnCacheReadTokens = 0;
+
         // Aggregate usage from modelUsage (more detailed) or fallback to usage
         if (result.modelUsage) {
           for (const modelStats of Object.values(result.modelUsage)) {
+            turnInputTokens += modelStats.inputTokens ?? 0;
+            turnOutputTokens += modelStats.outputTokens ?? 0;
+            turnCacheReadTokens += modelStats.cacheReadInputTokens ?? 0;
             this.sessionUsage.inputTokens += modelStats.inputTokens ?? 0;
             this.sessionUsage.outputTokens += modelStats.outputTokens ?? 0;
             this.sessionUsage.cacheReadTokens += modelStats.cacheReadInputTokens ?? 0;
             this.sessionUsage.cacheCreationTokens += modelStats.cacheCreationInputTokens ?? 0;
           }
         } else if (result.usage) {
-          this.sessionUsage.inputTokens += result.usage.input_tokens ?? 0;
-          this.sessionUsage.outputTokens += result.usage.output_tokens ?? 0;
-          this.sessionUsage.cacheReadTokens += result.usage.cache_read_input_tokens ?? 0;
+          turnInputTokens = result.usage.input_tokens ?? 0;
+          turnOutputTokens = result.usage.output_tokens ?? 0;
+          turnCacheReadTokens = result.usage.cache_read_input_tokens ?? 0;
+          this.sessionUsage.inputTokens += turnInputTokens;
+          this.sessionUsage.outputTokens += turnOutputTokens;
+          this.sessionUsage.cacheReadTokens += turnCacheReadTokens;
           this.sessionUsage.cacheCreationTokens += result.usage.cache_creation_input_tokens ?? 0;
         }
 
@@ -1283,6 +1342,42 @@ export class ClaudeSession {
           this.sessionUsage.totalCostUsd += result.total_cost_usd;
         }
         this.sessionUsage.turnCount += 1;
+
+        // Update and emit thread token usage
+        const turnTotalTokens = turnInputTokens + turnOutputTokens;
+        const lastUsage: TokenUsageBreakdown = {
+          totalTokens: turnTotalTokens,
+          inputTokens: turnInputTokens,
+          cachedInputTokens: turnCacheReadTokens,
+          outputTokens: turnOutputTokens,
+          reasoningOutputTokens: 0, // Claude SDK doesn't separate reasoning tokens
+        };
+
+        // Get or create thread usage
+        const existing = this.threadTokenUsage.get(thread.id);
+        const totalUsage: TokenUsageBreakdown = existing
+          ? {
+              totalTokens: existing.total.totalTokens + lastUsage.totalTokens,
+              inputTokens: existing.total.inputTokens + lastUsage.inputTokens,
+              cachedInputTokens: existing.total.cachedInputTokens + lastUsage.cachedInputTokens,
+              outputTokens: existing.total.outputTokens + lastUsage.outputTokens,
+              reasoningOutputTokens: existing.total.reasoningOutputTokens + lastUsage.reasoningOutputTokens,
+            }
+          : lastUsage;
+
+        const threadUsage: ThreadTokenUsage = {
+          total: totalUsage,
+          last: lastUsage,
+          modelContextWindow: getModelContextWindow(this.currentModel ?? undefined),
+        };
+
+        this.threadTokenUsage.set(thread.id, threadUsage);
+
+        // Emit thread token usage update
+        this.rpc.notify('thread/tokenUsage/updated', {
+          threadId: thread.id,
+          tokenUsage: threadUsage,
+        });
 
         // Emit updated rate limits
         this.emitRateLimitsUpdate();
