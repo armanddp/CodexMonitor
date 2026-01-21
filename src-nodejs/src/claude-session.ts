@@ -377,6 +377,88 @@ function inferFileChangeKind(toolName: string): FileChange['kind'] {
   return 'modify';
 }
 
+/**
+ * Generate a unified diff from old_string and new_string
+ * This is used for Edit tool calls to show the changes
+ */
+function generateUnifiedDiff(
+  filePath: string,
+  oldString: string,
+  newString: string,
+): string {
+  // If this is a new file (no old content), show the new content
+  if (!oldString && newString) {
+    const newLines = newString.split('\n');
+    const header = `--- /dev/null\n+++ ${filePath}\n@@ -0,0 +1,${newLines.length} @@\n`;
+    return header + newLines.map((line) => `+${line}`).join('\n');
+  }
+
+  // If deleting content, show the removed content
+  if (oldString && !newString) {
+    const oldLines = oldString.split('\n');
+    const header = `--- ${filePath}\n+++ /dev/null\n@@ -1,${oldLines.length} +0,0 @@\n`;
+    return header + oldLines.map((line) => `-${line}`).join('\n');
+  }
+
+  // For modifications, generate a unified diff
+  const oldLines = oldString.split('\n');
+  const newLines = newString.split('\n');
+
+  // Simple unified diff format
+  const header = `--- ${filePath}\n+++ ${filePath}\n@@ -1,${oldLines.length} +1,${newLines.length} @@\n`;
+  const oldPart = oldLines.map((line) => `-${line}`).join('\n');
+  const newPart = newLines.map((line) => `+${line}`).join('\n');
+
+  return header + oldPart + '\n' + newPart;
+}
+
+/**
+ * Extract diff content from Edit tool input
+ */
+function extractDiffFromInput(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  filePath: string,
+): string {
+  const normalized = toolName.toLowerCase();
+
+  // Edit tool: has old_string and new_string
+  if (normalized === 'edit' || normalized === 'str_replace_editor') {
+    const oldString = typeof toolInput.old_string === 'string' ? toolInput.old_string : '';
+    const newString = typeof toolInput.new_string === 'string' ? toolInput.new_string : '';
+
+    if (oldString || newString) {
+      return generateUnifiedDiff(filePath, oldString, newString);
+    }
+  }
+
+  // Write tool: new file content
+  if (normalized === 'write') {
+    const content = typeof toolInput.content === 'string' ? toolInput.content : '';
+    if (content) {
+      return generateUnifiedDiff(filePath, '', content);
+    }
+  }
+
+  // NotebookEdit tool: cell source
+  if (normalized === 'notebookedit') {
+    const newSource = typeof toolInput.new_source === 'string' ? toolInput.new_source : '';
+    const editMode = typeof toolInput.edit_mode === 'string' ? toolInput.edit_mode : 'replace';
+    if (newSource) {
+      if (editMode === 'insert') {
+        return generateUnifiedDiff(filePath, '', newSource);
+      }
+      if (editMode === 'delete') {
+        return generateUnifiedDiff(filePath, newSource, '');
+      }
+      // replace mode - show as new content since we don't have old
+      return generateUnifiedDiff(filePath, '', newSource);
+    }
+  }
+
+  return '';
+}
+
 function formatCommand(toolName: string, toolInput: Record<string, unknown>): string {
   const normalized = toolName.toLowerCase();
   // For bash, show the actual command
@@ -409,9 +491,13 @@ export function buildToolItem(
           ? toolInput.path
           : typeof toolInput.filePath === 'string'
             ? toolInput.filePath
-            : '';
+            : typeof toolInput.notebook_path === 'string'
+              ? toolInput.notebook_path
+              : '';
+    // Generate diff from tool input (old_string/new_string for Edit, content for Write)
+    const diff = extractDiffFromInput(toolName, toolInput, filePath);
     const changes = filePath
-      ? [{ path: filePath, kind: inferFileChangeKind(toolName) }]
+      ? [{ path: filePath, kind: inferFileChangeKind(toolName), diff: diff || undefined }]
       : [];
     return {
       item: {
@@ -420,7 +506,7 @@ export function buildToolItem(
         cwd,
         status: 'running',
         changes,
-        diff: '',
+        diff,
       },
       outputMethod: 'item/fileChange/outputDelta',
     };
@@ -972,13 +1058,13 @@ export class ClaudeSession {
     prompt: string | AsyncIterable<SDKUserMessage>,
     params: TurnStartParams,
   ): Promise<void> {
+    const { turnId, threadId } = context;
     try {
       const { query } = await import('@anthropic-ai/claude-agent-sdk');
       const approvalPolicy = params.approvalPolicy ?? 'on-request';
       const bypass = approvalPolicy === 'never';
       const sandboxPolicy = params.sandboxPolicy;
       const workspaceCwd = params.cwd || session.cwd;
-      const { turnId, threadId } = context;
       const toolOutputMethods = context.toolOutputMethods;
 
       // Helper to check if a path is within allowed roots
