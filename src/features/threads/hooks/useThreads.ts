@@ -405,27 +405,6 @@ function normalizePlanUpdate(
   };
 }
 
-function formatReviewLabel(target: ReturnType<typeof parseReviewTarget>) {
-  if (target.type === "uncommittedChanges") {
-    return "current changes";
-  }
-  if (target.type === "baseBranch") {
-    return `base branch ${target.branch}`;
-  }
-  if (target.type === "commit") {
-    return target.title
-      ? `commit ${target.sha}: ${target.title}`
-      : `commit ${target.sha}`;
-  }
-  const instructions = target.instructions.trim();
-  if (!instructions) {
-    return "custom review";
-  }
-  return instructions.length > 80
-    ? `${instructions.slice(0, 80)}…`
-    : instructions;
-}
-
 export function useThreads({
   activeWorkspace,
   onWorkspaceConnected,
@@ -439,6 +418,7 @@ export function useThreads({
 }: UseThreadsOptions) {
   const [state, dispatch] = useReducer(threadReducer, initialState);
   const loadedThreads = useRef<Record<string, boolean>>({});
+  const replaceOnResumeRef = useRef<Record<string, boolean>>({});
   const threadActivityRef = useRef<ThreadActivityMap>(loadThreadActivity());
   const pinnedThreadsRef = useRef<PinnedThreadsMap>(loadPinnedThreads());
   const [pinnedThreadsVersion, setPinnedThreadsVersion] = useState(0);
@@ -751,6 +731,18 @@ export function useThreads({
     [markProcessing, safeMessageActivity],
   );
 
+  const handleTerminalInteraction = useCallback(
+    (threadId: string, itemId: string, stdin: string) => {
+      if (!stdin) {
+        return;
+      }
+      const normalized = stdin.replace(/\r\n/g, "\n");
+      const suffix = normalized.endsWith("\n") ? "" : "\n";
+      handleToolOutputDelta(threadId, itemId, `\n[stdin]\n${normalized}${suffix}`);
+    },
+    [handleToolOutputDelta],
+  );
+
   const handleWorkspaceConnected = useCallback(
     (workspaceId: string) => {
       onWorkspaceConnected(workspaceId);
@@ -905,6 +897,14 @@ export function useThreads({
         delta: string,
       ) => {
         handleToolOutputDelta(threadId, itemId, delta);
+      },
+      onTerminalInteraction: (
+        _workspaceId: string,
+        threadId: string,
+        itemId: string,
+        stdin: string,
+      ) => {
+        handleTerminalInteraction(threadId, itemId, stdin);
       },
       onFileChangeOutputDelta: (
         _workspaceId: string,
@@ -1065,7 +1065,12 @@ export function useThreads({
   }, [activeWorkspaceId, startThreadForWorkspace]);
 
   const resumeThreadForWorkspace = useCallback(
-    async (workspaceId: string, threadId: string, force = false) => {
+    async (
+      workspaceId: string,
+      threadId: string,
+      force = false,
+      replaceLocal = false,
+    ) => {
       if (!threadId) {
         return null;
       }
@@ -1101,8 +1106,17 @@ export function useThreads({
           applyCollabThreadLinksFromThread(threadId, thread);
           const items = buildItemsFromThread(thread);
           const localItems = state.itemsByThread[threadId] ?? [];
+          const shouldReplace =
+            replaceLocal || replaceOnResumeRef.current[threadId] === true;
+          if (shouldReplace) {
+            replaceOnResumeRef.current[threadId] = false;
+          }
           const mergedItems =
-            items.length > 0 ? mergeThreadItems(items, localItems) : localItems;
+            items.length > 0
+              ? shouldReplace
+                ? items
+                : mergeThreadItems(items, localItems)
+              : localItems;
           if (mergedItems.length > 0) {
             dispatch({ type: "setThreadItems", threadId, items: mergedItems });
           }
@@ -1153,6 +1167,33 @@ export function useThreads({
       }
     },
     [applyCollabThreadLinksFromThread, getCustomName, onDebug, state.itemsByThread],
+  );
+
+  const refreshThread = useCallback(
+    async (workspaceId: string, threadId: string) => {
+      if (!threadId) {
+        return null;
+      }
+      replaceOnResumeRef.current[threadId] = true;
+      return resumeThreadForWorkspace(workspaceId, threadId, true, true);
+    },
+    [resumeThreadForWorkspace],
+  );
+
+  const resetWorkspaceThreads = useCallback(
+    (workspaceId: string) => {
+      const threadIds = new Set<string>();
+      const list = state.threadsByWorkspace[workspaceId] ?? [];
+      list.forEach((thread) => threadIds.add(thread.id));
+      const activeThread = state.activeThreadIdByWorkspace[workspaceId];
+      if (activeThread) {
+        threadIds.add(activeThread);
+      }
+      threadIds.forEach((threadId) => {
+        loadedThreads.current[threadId] = false;
+      });
+    },
+    [state.activeThreadIdByWorkspace, state.threadsByWorkspace],
   );
 
   const listThreadsForWorkspace = useCallback(
@@ -1705,16 +1746,6 @@ export function useThreads({
       const target = parseReviewTarget(text);
       markProcessing(threadId, true);
       dispatch({ type: "markReviewing", threadId, isReviewing: true });
-      dispatch({
-        type: "upsertItem",
-        threadId,
-        item: {
-          id: `review-start-${threadId}-${Date.now()}`,
-          kind: "review",
-          state: "started",
-          text: formatReviewLabel(target),
-        },
-      });
       safeMessageActivity();
       onDebug?.({
         id: `${Date.now()}-client-review-start`,
@@ -1901,6 +1932,8 @@ export function useThreads({
     startThread,
     startThreadForWorkspace,
     listThreadsForWorkspace,
+    refreshThread,
+    resetWorkspaceThreads,
     loadOlderThreadsForWorkspace,
     sendUserMessage,
     sendUserMessageToThread,
