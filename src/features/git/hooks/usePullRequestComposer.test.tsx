@@ -39,7 +39,7 @@ const connectedWorkspace: WorkspaceInfo = {
   name: "CodexMonitor",
   path: "/tmp/codex",
   connected: true,
-  settings: { sidebarCollapsed: false },
+  settings: { sidebarCollapsed: false, providerType: "codex" },
 };
 
 const disconnectedWorkspace: WorkspaceInfo = {
@@ -47,7 +47,7 @@ const disconnectedWorkspace: WorkspaceInfo = {
   name: "CodexMonitor",
   path: "/tmp/codex",
   connected: false,
-  settings: { sidebarCollapsed: false },
+  settings: { sidebarCollapsed: false, providerType: "codex" },
 };
 
 const makeOptions = (overrides: Partial<Parameters<typeof usePullRequestComposer>[0]> = {}) => ({

@@ -11,7 +11,7 @@ const worktree: WorkspaceInfo = {
   connected: true,
   kind: "worktree",
   worktree: { branch: "feature/test" },
-  settings: { sidebarCollapsed: false },
+  settings: { sidebarCollapsed: false, providerType: "codex" },
 };
 
 describe("WorktreeSection", () => {

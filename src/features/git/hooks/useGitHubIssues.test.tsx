@@ -14,7 +14,7 @@ const workspace: WorkspaceInfo = {
   name: "CodexMonitor",
   path: "/tmp/codex",
   connected: true,
-  settings: { sidebarCollapsed: false },
+  settings: { sidebarCollapsed: false, providerType: "codex" },
 };
 
 describe("useGitHubIssues", () => {

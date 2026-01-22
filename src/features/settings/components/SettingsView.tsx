@@ -17,6 +17,7 @@ import type {
   AppSettings,
   CodexDoctorResult,
   DictationModelStatus,
+  ProviderType,
   WorkspaceGroup,
   WorkspaceInfo,
 } from "../../../types";
@@ -57,6 +58,7 @@ type SettingsViewProps = {
   onUpdateAppSettings: (next: AppSettings) => Promise<void>;
   onRunDoctor: (codexBin: string | null) => Promise<CodexDoctorResult>;
   onUpdateWorkspaceCodexBin: (id: string, codexBin: string | null) => Promise<void>;
+  onUpdateWorkspaceProviderType: (id: string, providerType: ProviderType) => Promise<void>;
   scaleShortcutTitle: string;
   scaleShortcutText: string;
   onTestNotificationSound: () => void;
@@ -68,7 +70,7 @@ type SettingsViewProps = {
 };
 
 type SettingsSection = "projects" | "display" | "dictation" | "shortcuts";
-type CodexSection = SettingsSection | "codex" | "experimental";
+type CodexSection = SettingsSection | "backends" | "experimental";
 
 export function SettingsView({
   workspaceGroups,
@@ -88,6 +90,7 @@ export function SettingsView({
   onUpdateAppSettings,
   onRunDoctor,
   onUpdateWorkspaceCodexBin,
+  onUpdateWorkspaceProviderType,
   scaleShortcutTitle,
   scaleShortcutText,
   onTestNotificationSound,
@@ -99,6 +102,7 @@ export function SettingsView({
 }: SettingsViewProps) {
   const [activeSection, setActiveSection] = useState<CodexSection>("projects");
   const [codexPathDraft, setCodexPathDraft] = useState(appSettings.codexBin ?? "");
+  const [claudePathDraft, setClaudePathDraft] = useState(appSettings.claudeBin ?? "");
   const [remoteHostDraft, setRemoteHostDraft] = useState(appSettings.remoteBackendHost);
   const [remoteTokenDraft, setRemoteTokenDraft] = useState(appSettings.remoteBackendToken ?? "");
   const [scaleDraft, setScaleDraft] = useState(
@@ -136,6 +140,10 @@ export function SettingsView({
   useEffect(() => {
     setCodexPathDraft(appSettings.codexBin ?? "");
   }, [appSettings.codexBin]);
+
+  useEffect(() => {
+    setClaudePathDraft(appSettings.claudeBin ?? "");
+  }, [appSettings.claudeBin]);
 
   useEffect(() => {
     setRemoteHostDraft(appSettings.remoteBackendHost);
@@ -191,6 +199,9 @@ export function SettingsView({
   const codexDirty =
     (codexPathDraft.trim() || null) !== (appSettings.codexBin ?? null);
 
+  const claudeDirty =
+    (claudePathDraft.trim() || null) !== (appSettings.claudeBin ?? null);
+
   const trimmedScale = scaleDraft.trim();
   const parsedPercent = trimmedScale
     ? Number(trimmedScale.replace("%", ""))
@@ -203,6 +214,18 @@ export function SettingsView({
       await onUpdateAppSettings({
         ...appSettings,
         codexBin: codexPathDraft.trim() ? codexPathDraft.trim() : null,
+      });
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const handleSaveClaudeSettings = async () => {
+    setIsSavingSettings(true);
+    try {
+      await onUpdateAppSettings({
+        ...appSettings,
+        claudeBin: claudePathDraft.trim() ? claudePathDraft.trim() : null,
       });
     } finally {
       setIsSavingSettings(false);
@@ -267,6 +290,14 @@ export function SettingsView({
       return;
     }
     setCodexPathDraft(selection);
+  };
+
+  const handleBrowseClaude = async () => {
+    const selection = await open({ multiple: false, directory: false });
+    if (!selection || Array.isArray(selection)) {
+      return;
+    }
+    setClaudePathDraft(selection);
   };
 
   const handleRunDoctor = async () => {
@@ -478,11 +509,11 @@ export function SettingsView({
             </button>
             <button
               type="button"
-              className={`settings-nav ${activeSection === "codex" ? "active" : ""}`}
-              onClick={() => setActiveSection("codex")}
+              className={`settings-nav ${activeSection === "backends" ? "active" : ""}`}
+              onClick={() => setActiveSection("backends")}
             >
               <TerminalSquare aria-hidden />
-              Codex
+              Backends
             </button>
             <button
               type="button"
@@ -1112,11 +1143,83 @@ export function SettingsView({
                 </div>
               </section>
             )}
-            {activeSection === "codex" && (
+            {activeSection === "backends" && (
               <section className="settings-section">
-                <div className="settings-section-title">Codex</div>
+                <div className="settings-section-title">Backends</div>
                 <div className="settings-section-subtitle">
-                  Configure the Codex CLI used by CodexMonitor and validate the install.
+                  Configure AI agent backends and connection settings.
+                </div>
+                <div className="settings-subsection-title">Workspace settings</div>
+                <div className="settings-subsection-subtitle">
+                  Configure provider and CLI path per workspace.
+                </div>
+                <div className="settings-field">
+                  <div className="settings-overrides">
+                    {projects.map((workspace) => (
+                      <div key={workspace.id} className="settings-override-row">
+                        <div className="settings-override-info">
+                          <div className="settings-project-name">{workspace.name}</div>
+                          <div className="settings-project-path">{workspace.path}</div>
+                        </div>
+                        <div className="settings-override-actions">
+                          <select
+                            className="settings-select settings-select--compact"
+                            value={workspace.settings.providerType}
+                            onChange={(event) => {
+                              void onUpdateWorkspaceProviderType(
+                                workspace.id,
+                                event.target.value as ProviderType,
+                              );
+                            }}
+                            aria-label="Agent provider"
+                          >
+                            <option value="codex">Codex</option>
+                            <option value="claude">Claude</option>
+                          </select>
+                          <input
+                            className="settings-input settings-input--compact"
+                            value={overrideDrafts[workspace.id] ?? ""}
+                            placeholder="CLI path override"
+                            onChange={(event) =>
+                              setOverrideDrafts((prev) => ({
+                                ...prev,
+                                [workspace.id]: event.target.value,
+                              }))
+                            }
+                            onBlur={async () => {
+                              const draft = overrideDrafts[workspace.id] ?? "";
+                              const nextValue = draft.trim() || null;
+                              if (nextValue === (workspace.codex_bin ?? null)) {
+                                return;
+                              }
+                              await onUpdateWorkspaceCodexBin(workspace.id, nextValue);
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={async () => {
+                              setOverrideDrafts((prev) => ({
+                                ...prev,
+                                [workspace.id]: "",
+                              }));
+                              await onUpdateWorkspaceCodexBin(workspace.id, null);
+                            }}
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {projects.length === 0 && (
+                      <div className="settings-empty">No projects yet.</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="settings-subsection-title">Provider paths</div>
+                <div className="settings-subsection-subtitle">
+                  Configure CLI paths for each agent provider.
                 </div>
                 <div className="settings-field">
                   <label className="settings-field-label" htmlFor="codex-path">
@@ -1202,6 +1305,50 @@ export function SettingsView({
                 )}
               </div>
 
+                <div className="settings-field">
+                  <label className="settings-field-label" htmlFor="claude-path">
+                    Claude CLI path
+                  </label>
+                  <div className="settings-field-row">
+                    <input
+                      id="claude-path"
+                      className="settings-input"
+                      value={claudePathDraft}
+                      placeholder="claude"
+                      onChange={(event) => setClaudePathDraft(event.target.value)}
+                    />
+                    <button type="button" className="ghost" onClick={handleBrowseClaude}>
+                      Browse
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setClaudePathDraft("")}
+                    >
+                      Use PATH
+                    </button>
+                  </div>
+                  <div className="settings-help">
+                    Path to Claude Code CLI. Leave empty to use the system PATH resolution.
+                  </div>
+                  <div className="settings-field-actions">
+                    {claudeDirty && (
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={handleSaveClaudeSettings}
+                        disabled={isSavingSettings}
+                      >
+                        {isSavingSettings ? "Saving..." : "Save"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="settings-subsection-title">Defaults</div>
+                <div className="settings-subsection-subtitle">
+                  Configure default behavior for new sessions.
+                </div>
                 <div className="settings-field">
                   <label className="settings-field-label" htmlFor="default-access">
                     Default access mode
@@ -1289,57 +1436,6 @@ export function SettingsView({
                     </div>
                   </div>
                 )}
-
-                <div className="settings-field">
-                  <div className="settings-field-label">Workspace overrides</div>
-                  <div className="settings-overrides">
-                    {projects.map((workspace) => (
-                      <div key={workspace.id} className="settings-override-row">
-                        <div className="settings-override-info">
-                          <div className="settings-project-name">{workspace.name}</div>
-                          <div className="settings-project-path">{workspace.path}</div>
-                        </div>
-                        <div className="settings-override-actions">
-                          <input
-                            className="settings-input settings-input--compact"
-                            value={overrideDrafts[workspace.id] ?? ""}
-                            placeholder="Use default"
-                            onChange={(event) =>
-                              setOverrideDrafts((prev) => ({
-                                ...prev,
-                                [workspace.id]: event.target.value,
-                              }))
-                            }
-                            onBlur={async () => {
-                              const draft = overrideDrafts[workspace.id] ?? "";
-                              const nextValue = draft.trim() || null;
-                              if (nextValue === (workspace.codex_bin ?? null)) {
-                                return;
-                              }
-                              await onUpdateWorkspaceCodexBin(workspace.id, nextValue);
-                            }}
-                          />
-                          <button
-                            type="button"
-                            className="ghost"
-                            onClick={async () => {
-                              setOverrideDrafts((prev) => ({
-                                ...prev,
-                                [workspace.id]: "",
-                              }));
-                              await onUpdateWorkspaceCodexBin(workspace.id, null);
-                            }}
-                          >
-                            Clear
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                    {projects.length === 0 && (
-                      <div className="settings-empty">No projects yet.</div>
-                    )}
-                  </div>
-                </div>
 
               </section>
             )}

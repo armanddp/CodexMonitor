@@ -428,6 +428,7 @@ export function useLayoutNodes(options: LayoutNodesOptions): LayoutNodesResult {
 
   const composerNode = options.showComposer ? (
     <Composer
+      providerType={options.activeWorkspace?.settings.providerType}
       onSend={options.onSend}
       onQueue={options.onQueue}
       onStop={options.onStop}

@@ -286,6 +286,19 @@
   white-space: nowrap;
 }
 
+.provider-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.provider-logo svg {
+  display: block;
+}
+
 
 .connect {
   font-size: 12px;

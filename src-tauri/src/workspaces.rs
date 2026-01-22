@@ -445,12 +445,13 @@ pub(crate) async fn add_workspace(
         settings: WorkspaceSettings::default(),
     };
 
-    let default_bin = {
+    let (default_bin, claude_bin) = {
         let settings = state.app_settings.lock().await;
-        settings.codex_bin.clone()
+        (settings.codex_bin.clone(), settings.claude_bin.clone())
     };
     let codex_home = resolve_workspace_codex_home(&entry, None);
-    let session = spawn_workspace_session(entry.clone(), default_bin, app, codex_home).await?;
+    let session =
+        spawn_workspace_session(entry.clone(), default_bin, claude_bin, app, codex_home).await?;
 
     if let Err(error) = {
         let mut workspaces = state.workspaces.lock().await;
@@ -462,8 +463,7 @@ pub(crate) async fn add_workspace(
             let mut workspaces = state.workspaces.lock().await;
             workspaces.remove(&entry.id);
         }
-        let mut child = session.child.lock().await;
-        let _ = child.kill().await;
+        let _ = session.shutdown().await;
         return Err(error);
     }
 
@@ -563,12 +563,12 @@ pub(crate) async fn add_clone(
         },
     };
 
-    let default_bin = {
+    let (default_bin, claude_bin) = {
         let settings = state.app_settings.lock().await;
-        settings.codex_bin.clone()
+        (settings.codex_bin.clone(), settings.claude_bin.clone())
     };
     let codex_home = resolve_workspace_codex_home(&entry, None);
-    let session = match spawn_workspace_session(entry.clone(), default_bin, app, codex_home).await {
+    let session = match spawn_workspace_session(entry.clone(), default_bin, claude_bin, app, codex_home).await {
         Ok(session) => session,
         Err(error) => {
             let _ = tokio::fs::remove_dir_all(&destination_path).await;
@@ -586,8 +586,7 @@ pub(crate) async fn add_clone(
             let mut workspaces = state.workspaces.lock().await;
             workspaces.remove(&entry.id);
         }
-        let mut child = session.child.lock().await;
-        let _ = child.kill().await;
+        let _ = session.shutdown().await;
         let _ = tokio::fs::remove_dir_all(&destination_path).await;
         return Err(error);
     }
@@ -676,12 +675,13 @@ pub(crate) async fn add_worktree(
         settings: WorkspaceSettings::default(),
     };
 
-    let default_bin = {
+    let (default_bin, claude_bin) = {
         let settings = state.app_settings.lock().await;
-        settings.codex_bin.clone()
+        (settings.codex_bin.clone(), settings.claude_bin.clone())
     };
     let codex_home = resolve_workspace_codex_home(&entry, Some(&parent_entry.path));
-    let session = spawn_workspace_session(entry.clone(), default_bin, app, codex_home).await?;
+    let session =
+        spawn_workspace_session(entry.clone(), default_bin, claude_bin, app, codex_home).await?;
     {
         let mut workspaces = state.workspaces.lock().await;
         workspaces.insert(entry.id.clone(), entry.clone());
@@ -732,8 +732,7 @@ pub(crate) async fn remove_workspace(
     let parent_path = PathBuf::from(&entry.path);
     for child in &child_worktrees {
         if let Some(session) = state.sessions.lock().await.remove(&child.id) {
-            let mut child_process = session.child.lock().await;
-            let _ = child_process.kill().await;
+            let _ = session.shutdown().await;
         }
         let child_path = PathBuf::from(&child.path);
         if child_path.exists() {
@@ -747,8 +746,7 @@ pub(crate) async fn remove_workspace(
     let _ = run_git_command(&parent_path, &["worktree", "prune", "--expire", "now"]).await;
 
     if let Some(session) = state.sessions.lock().await.remove(&id) {
-        let mut child = session.child.lock().await;
-        let _ = child.kill().await;
+        let _ = session.shutdown().await;
     }
 
     {
@@ -790,8 +788,7 @@ pub(crate) async fn remove_worktree(
     };
 
     if let Some(session) = state.sessions.lock().await.remove(&entry.id) {
-        let mut child = session.child.lock().await;
-        let _ = child.kill().await;
+        let _ = session.shutdown().await;
     }
 
     let parent_path = PathBuf::from(&parent.path);
@@ -1295,12 +1292,19 @@ pub(crate) async fn connect_workspace(
             .ok_or("workspace not found")?
     };
 
-    let default_bin = {
+    let (default_bin, claude_bin) = {
         let settings = state.app_settings.lock().await;
-        settings.codex_bin.clone()
+        (settings.codex_bin.clone(), settings.claude_bin.clone())
     };
     let codex_home = resolve_workspace_codex_home(&entry, parent_path.as_deref());
-    let session = spawn_workspace_session(entry.clone(), default_bin, app, codex_home).await?;
+
+    // Shutdown existing session before spawning a new one (e.g., when changing provider type)
+    if let Some(old_session) = state.sessions.lock().await.remove(&id) {
+        let _ = old_session.shutdown().await;
+    }
+
+    let session =
+        spawn_workspace_session(entry.clone(), default_bin, claude_bin, app, codex_home).await?;
     state.sessions.lock().await.insert(entry.id, session);
     Ok(())
 }
@@ -1395,6 +1399,7 @@ mod tests {
                 sort_order,
                 group_id: None,
                 git_root: None,
+                provider_type: crate::types::ProviderType::default(),
             },
         }
     }

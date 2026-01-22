@@ -116,6 +116,7 @@ import {
 import type {
   AccessMode,
   GitHubPullRequest,
+  ProviderType,
   QueuedMessage,
   WorkspaceInfo,
 } from "./types";
@@ -220,7 +221,7 @@ function MainApp() {
     | "display"
     | "dictation"
     | "shortcuts"
-    | "codex"
+    | "backends"
     | "experimental";
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(
@@ -2222,6 +2223,20 @@ function MainApp() {
           onRunDoctor={doctor}
           onUpdateWorkspaceCodexBin={async (id, codexBin) => {
             await updateWorkspaceCodexBin(id, codexBin);
+          }}
+          onUpdateWorkspaceProviderType={async (id, providerType: ProviderType) => {
+            const workspace = workspaces.find((w) => w.id === id);
+            if (workspace) {
+              // Update settings with new provider type
+              const updated = await updateWorkspaceSettings(id, {
+                ...workspace.settings,
+                providerType,
+              });
+              // Reconnect to use the new provider
+              if (updated.connected) {
+                await connectWorkspace(updated);
+              }
+            }
           }}
           scaleShortcutTitle={scaleShortcutTitle}
           scaleShortcutText={scaleShortcutText}

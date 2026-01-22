@@ -1,8 +1,11 @@
+export type ProviderType = "codex" | "claude";
+
 export type WorkspaceSettings = {
   sidebarCollapsed: boolean;
   sortOrder?: number | null;
   groupId?: string | null;
   gitRoot?: string | null;
+  providerType: ProviderType;
 };
 
 export type WorkspaceGroup = {
@@ -75,6 +78,7 @@ export type ThemePreference = "system" | "light" | "dark";
 
 export type AppSettings = {
   codexBin: string | null;
+  claudeBin: string | null;
   backendMode: BackendMode;
   remoteBackendHost: string;
   remoteBackendToken: string | null;
