@@ -553,9 +553,10 @@
 }
 
 .tool-inline-command {
-  font-family: "SF Mono", "SF Pro Text", ui-monospace, SFMono-Regular, Menlo,
-    Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  font-size: 11px;
+  font-family: var(--code-font-family);
+  font-size: var(--code-font-size, 11px);
+  font-weight: var(--code-font-weight, 400);
+  line-height: var(--code-line-height, 1.28);
   color: var(--text-quiet);
   background: var(--surface-command);
   padding: 2px 6px;
@@ -716,10 +717,11 @@
   border-radius: 10px;
   border: 1px solid var(--border-subtle);
   padding: 8px 10px;
-  font-size: 11px;
+  font-size: var(--code-font-size, 11px);
   color: var(--text-quiet);
-  font-family: "SF Mono", "SF Pro Text", ui-monospace, SFMono-Regular, Menlo,
-    Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: var(--code-font-family);
+  font-weight: var(--code-font-weight, 400);
+  line-height: var(--code-line-height, 1.28);
 }
 
 .tool-inline-terminal-lines {
@@ -727,9 +729,9 @@
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  line-height: 1.35;
-  max-height: calc(1.35em * 6);
-  min-height: calc(1.35em * 5);
+  line-height: var(--code-line-height, 1.28);
+  max-height: calc(var(--code-line-height, 1.28) * 6em);
+  min-height: calc(var(--code-line-height, 1.28) * 5em);
   overflow-y: auto;
   overflow-x: hidden;
   gap: 2px;
@@ -896,7 +898,9 @@
 }
 
 .markdown code {
-  font-family: "SFMono-Regular", "Menlo", "Monaco", monospace;
+  font-family: var(--code-font-family);
+  font-weight: var(--code-font-weight, 400);
+  line-height: var(--code-line-height, 1.28);
 }
 
 .message .markdown :not(pre) > code {
@@ -959,8 +963,10 @@
   padding: 10px 12px 12px;
   white-space: pre;
   overflow-x: auto;
-  font-size: 11px;
-  line-height: 1.35;
+  font-family: var(--code-font-family);
+  font-size: var(--code-font-size, 11px);
+  font-weight: var(--code-font-weight, 400);
+  line-height: var(--code-line-height, 1.28);
 }
 
 .message .markdown-codeblock-single {
@@ -971,14 +977,18 @@
   background: var(--surface-command);
   white-space: pre;
   overflow-x: auto;
-  font-size: 11px;
-  line-height: 1.35;
+  font-family: var(--code-font-family);
+  font-size: var(--code-font-size, 11px);
+  font-weight: var(--code-font-weight, 400);
+  line-height: var(--code-line-height, 1.28);
   box-shadow: 0 10px 20px rgba(0, 0, 0, 0.14);
 }
 
 .message .markdown-codeblock-single code {
   display: block;
-  font-family: "SFMono-Regular", "Menlo", "Monaco", monospace;
+  font-family: var(--code-font-family);
+  font-weight: var(--code-font-weight, 400);
+  line-height: var(--code-line-height, 1.28);
 }
 
 .message .markdown-linkblock {

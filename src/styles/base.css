@@ -10,6 +10,8 @@
     sans-serif;
   --code-font-family: "SF Mono", "SFMono-Regular", Menlo, Monaco, monospace;
   --code-font-size: 11px;
+  --code-font-weight: 400;
+  --code-line-height: 1.28;
   --text-primary: #e6e7ea;
   --text-strong: #ffffff;
   --text-emphasis: rgba(255, 255, 255, 0.9);

@@ -347,8 +347,9 @@
   padding: 6px 0;
   font-family: var(--code-font-family);
   font-size: var(--code-font-size, 11px);
+  font-weight: var(--code-font-weight, 400);
+  line-height: var(--code-line-height, 1.28);
   color: var(--text-quiet);
-  line-height: 1.2;
   white-space: pre;
 }
 
@@ -369,6 +370,10 @@
   transform: none;
   box-shadow: none;
   outline: none;
+  font-family: var(--code-font-family);
+  font-size: var(--code-font-size, 11px);
+  font-weight: var(--code-font-weight, 400);
+  line-height: var(--code-line-height, 1.28);
 }
 
 .file-preview-line:not(.is-selected):hover {
@@ -413,8 +418,6 @@
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
-  font-family: var(--code-font-family);
-  font-size: var(--code-font-size, 11px);
 }
 
 .file-preview-line-text .token.comment,

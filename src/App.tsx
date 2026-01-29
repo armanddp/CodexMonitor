@@ -103,6 +103,7 @@ import type {
 } from "./types";
 import { OPEN_APP_STORAGE_KEY } from "./features/app/constants";
 import { useOpenAppIcons } from "./features/app/hooks/useOpenAppIcons";
+import { useCodeCssVars } from "./features/app/hooks/useCodeCssVars";
 
 const AboutView = lazy(() =>
   import("./features/about/components/AboutView").then((module) => ({
@@ -135,6 +136,7 @@ function MainApp() {
     scaleShortcutText,
     queueSaveSettings,
   } = useAppSettingsController();
+  useCodeCssVars(appSettings);
   const {
     dictationModel,
     dictationState,
